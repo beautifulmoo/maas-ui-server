@@ -96,6 +96,53 @@ public class MaasController {
     }
     
     /**
+     * 새 머신을 추가합니다.
+     */
+    @PostMapping("/machines")
+    public Mono<ResponseEntity<Map<String, Object>>> addMachine(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam(required = false) String hostname,
+            @RequestParam(defaultValue = "amd64") String architecture,
+            @RequestParam String macAddresses,
+            @RequestParam(defaultValue = "manual") String powerType,
+            @RequestParam(defaultValue = "false") String commission,
+            @RequestParam(required = false) String description) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.addMachine(maasUrl, apiKey, hostname, architecture, 
+                macAddresses, powerType, commission, description)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to add machine")));
+    }
+    
+    /**
+     * 머신을 커미셔닝합니다.
+     */
+    @PostMapping("/machines/{systemId}/commission")
+    public Mono<ResponseEntity<Map<String, Object>>> commissionMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam(defaultValue = "1") String skipBmcConfig) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.commissionMachine(maasUrl, apiKey, systemId, skipBmcConfig)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to commission machine")));
+    }
+    
+    /**
      * 헬스 체크 엔드포인트
      */
     @GetMapping("/health")
