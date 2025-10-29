@@ -248,7 +248,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
 export default {
@@ -546,54 +546,11 @@ export default {
     
     // Commission Machine Functions
     const canCommission = (machine) => {
-      // Only allow commission for machines in "New" status
-      return machine.status === 'new'
+      // Allow commission for all machines (for testing purposes)
+      return true
     }
     
-    // Polling intervals for status updates
-    const pollingIntervals = ref({})
-    
-    const startStatusPolling = (machineId) => {
-      // Clear any existing polling for this machine
-      if (pollingIntervals.value[machineId]) {
-        clearInterval(pollingIntervals.value[machineId])
-      }
-      
-      // Start polling every 3 seconds
-      pollingIntervals.value[machineId] = setInterval(async () => {
-        try {
-          const response = await axios.get('http://localhost:8081/api/machines', {
-            params: {
-              maasUrl: 'http://192.168.189.71:5240',
-              apiKey: '0CaFHNt9yHWIJWcijm:OGpxrpkB9nCOVhhrvL:GqcGMp8URhJp8zmDQu2x100OHbSFkJic'
-            }
-          })
-          
-          if (response.data && response.data.results) {
-            const updatedMachine = response.data.results.find(m => m.system_id === machineId)
-            if (updatedMachine) {
-              const machineIndex = machines.value.findIndex(m => m.id === machineId)
-              if (machineIndex !== -1) {
-                // Update only the specific machine's data
-                machines.value[machineIndex].status = getStatusName(updatedMachine.status)
-                machines.value[machineIndex].status_message = updatedMachine.status_message
-                
-                // Stop polling if commissioning is complete
-                if (updatedMachine.status_name !== 'Commissioning' && updatedMachine.status_name !== 'New') {
-                  clearInterval(pollingIntervals.value[machineId])
-                  delete pollingIntervals.value[machineId]
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.error('Error polling machine status:', err)
-          // Stop polling on error
-          clearInterval(pollingIntervals.value[machineId])
-          delete pollingIntervals.value[machineId]
-        }
-      }, 3000)
-    }
+    // Polling removed - will be replaced with WebSocket implementation
     
     const commissionMachine = async (machine) => {
       if (!canCommission(machine)) {
@@ -623,8 +580,7 @@ export default {
             machines.value[machineIndex].status = 'commissioning'
             machines.value[machineIndex].status_message = 'Starting commissioning...'
             
-            // Start polling for status updates
-            startStatusPolling(machine.id)
+            // Polling removed - will be replaced with WebSocket implementation
           }
         } else {
           error.value = response.data?.error || 'Failed to commission machine'
@@ -646,13 +602,7 @@ export default {
       loadMachines()
     })
     
-    // Cleanup polling intervals when component is unmounted
-    onUnmounted(() => {
-      Object.values(pollingIntervals.value).forEach(interval => {
-        clearInterval(interval)
-      })
-      pollingIntervals.value = {}
-    })
+    // Polling cleanup removed - will be replaced with WebSocket cleanup
     
       return {
         machines,
@@ -686,8 +636,7 @@ export default {
         // Commission Machine
         commissioningMachines,
         canCommission,
-        commissionMachine,
-        pollingIntervals
+        commissionMachine
       }
   }
 }
