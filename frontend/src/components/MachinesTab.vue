@@ -1,27 +1,36 @@
 <template>
   <div class="machines">
+    <div class="header">
     <h2>Machines</h2>
+      <div class="connection-status">
+        <span :class="['status-indicator', connectionStatus]">
+          {{ connectionStatus === 'connected' ? 'Live' : 
+             connectionStatus === 'connecting' ? 'Connecting' : 
+             connectionStatus === 'error' ? 'Error' : 'Offline' }}
+        </span>
+      </div>
+    </div>
     
-          <div class="controls">
-            <div class="search-box">
-              <input
-                type="text"
-                v-model="searchQuery"
-                placeholder="Search machines..."
-                class="search-input"
-              >
-            </div>
-
-            <div class="filter-buttons">
-              <button
-                v-for="status in statusFilters"
-                :key="status"
-                :class="['filter-btn', { active: selectedStatus === status }]"
-                @click="selectedStatus = status"
-              >
-                {{ status }}
-              </button>
-            </div>
+    <div class="controls">
+      <div class="search-box">
+        <input 
+          type="text" 
+          v-model="searchQuery" 
+          placeholder="Search machines..."
+          class="search-input"
+        >
+      </div>
+      
+      <div class="filter-buttons">
+        <button 
+          v-for="status in statusFilters" 
+          :key="status"
+          :class="['filter-btn', { active: selectedStatus === status }]"
+          @click="selectedStatus = status"
+        >
+          {{ status }}
+        </button>
+      </div>
 
             <div class="action-buttons">
               <button class="btn-primary add-machine-btn" @click="showAddMachineModal">
@@ -29,7 +38,7 @@
                 Add Machine
               </button>
             </div>
-          </div>
+    </div>
     
     <div class="loading" v-if="loading">
       <p>Loading machines...</p>
@@ -62,8 +71,8 @@
         </thead>
         <tbody>
           <tr 
-            v-for="machine in filteredMachines" 
-            :key="machine.id"
+        v-for="machine in filteredMachines" 
+        :key="machine.id"
             :class="['machine-row', { selected: selectedMachines.includes(machine.id) }]"
           >
             <td class="checkbox-col">
@@ -89,9 +98,9 @@
             </td>
             <td class="status-col">
               <div class="status-container">
-                <span :class="['status-badge', machine.status]">
+          <span :class="['status-badge', machine.status]">
                   {{ getStatusText(machine.status) }}
-                </span>
+          </span>
                 <div v-if="machine.status_message" class="status-message">
                   {{ machine.status_message }}
                 </div>
@@ -142,17 +151,17 @@
           </tr>
         </tbody>
       </table>
-    </div>
-    
+        </div>
+        
     <div v-if="!loading && !error && filteredMachines.length === 0" class="no-machines">
       <p>No machines found matching your criteria.</p>
-    </div>
+          </div>
     
     <!-- Pagination -->
     <div class="pagination" v-if="!loading && !error && filteredMachines.length > 0">
       <div class="pagination-info">
         Showing {{ filteredMachines.length }} out of {{ machines.length }} machines
-      </div>
+          </div>
       <div class="pagination-controls">
         <button class="btn-small" :disabled="currentPage === 1" @click="currentPage = 1">
           &lt; Page {{ currentPage }} of {{ totalPages }} &gt;
@@ -162,8 +171,8 @@
           <option value="50">50/page</option>
           <option value="100">100/page</option>
         </select>
-      </div>
-    </div>
+          </div>
+          </div>
 
     <!-- Add Machine Modal -->
     <div v-if="showAddModal" class="modal-overlay" @click="closeAddMachineModal">
@@ -183,14 +192,14 @@
               placeholder="e.g., web-server-02"
               class="form-input"
             >
-          </div>
+        </div>
 
           <div class="form-group">
             <label for="architecture">Architecture *</label>
             <select id="architecture" v-model="newMachine.architecture" class="form-select" required>
               <option value="amd64">amd64</option>
             </select>
-          </div>
+      </div>
 
           <div class="form-group">
             <label for="macAddresses">MAC Address *</label>
@@ -204,8 +213,8 @@
               @blur="validateMacAddress"
             >
             <div v-if="macAddressError" class="error-message">{{ macAddressError }}</div>
-          </div>
-
+    </div>
+    
           <div class="form-group">
             <label for="powerType">Power Type</label>
             <select id="powerType" v-model="newMachine.powerType" class="form-select">
@@ -248,8 +257,9 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
+import { useWebSocket } from '../composables/useWebSocket'
 
 export default {
   name: 'MachinesTab',
@@ -264,6 +274,9 @@ export default {
     const selectAll = ref(false)
     const currentPage = ref(1)
     const itemsPerPage = ref(25)
+    
+    // WebSocket 연결
+    const { connectionStatus, lastMessage, sendMessage } = useWebSocket()
     
     // Add Machine Modal
     const showAddModal = ref(false)
@@ -310,11 +323,13 @@ export default {
     })
     
     const loadMachines = async () => {
+      loading.value = true
+      error.value = null
+      
       try {
-        loading.value = true
-        error.value = null
+        console.log('🔄 Loading machines via REST API...')
         
-        // 실제 백엔드 API 호출
+        // REST API로 머신 목록 가져오기
         const response = await axios.get('http://localhost:8081/api/machines', {
           params: {
             maasUrl: 'http://192.168.189.71:5240',
@@ -328,7 +343,7 @@ export default {
             id: machine.system_id,
             hostname: machine.hostname,
             status: getStatusName(machine.status),
-            status_message: machine.status_message, // status_message 추가
+            status_message: machine.status_message,
             ip_addresses: machine.ip_addresses || [],
             mac_addresses: extractMacAddresses(machine),
             architecture: machine.architecture,
@@ -343,8 +358,8 @@ export default {
             zone: machine.zone?.name || 'default',
             fabric: machine.fabric?.name || '-'
           }))
+          console.log(`✅ Loaded ${machines.value.length} machines via REST API`)
         } else {
-          // 실제 데이터가 없는 경우 빈 배열
           machines.value = []
         }
         
@@ -354,11 +369,10 @@ export default {
         console.error('Error loading machines:', err)
         error.value = err.response?.data?.error || err.message || 'Failed to load machines'
         loading.value = false
-        
-        // 에러 발생 시 빈 배열로 설정 (목업 데이터 사용 안함)
         machines.value = []
       }
     }
+    
     
     const formatMemory = (memoryMB) => {
       if (!memoryMB) return '0 GiB'
@@ -379,20 +393,43 @@ export default {
     }
     
     const getStatusName = (statusCode) => {
-      const statusMap = {
-        0: 'new',
-        1: 'commissioning', 
-        2: 'failed',
-        3: 'commissioning',
-        4: 'ready',
-        5: 'reserved',
-        6: 'deployed',
-        7: 'retired',
-        8: 'broken',
-        9: 'deploying',
-        10: 'allocated'
+      // 숫자 코드인 경우
+      if (typeof statusCode === 'number') {
+        const statusMap = {
+          0: 'new',
+          1: 'commissioning', 
+          2: 'failed',
+          3: 'commissioning',
+          4: 'ready',
+          5: 'reserved',
+          6: 'deployed',
+          7: 'retired',
+          8: 'broken',
+          9: 'deploying',
+          10: 'allocated'
+        }
+        return statusMap[statusCode] || 'unknown'
       }
-      return statusMap[statusCode] || 'unknown'
+      
+      // 문자열인 경우 (이미 변환된 상태)
+      if (typeof statusCode === 'string') {
+        const stringStatusMap = {
+          'new': 'new',
+          'commissioning': 'commissioning',
+          'failed': 'failed',
+          'ready': 'ready',
+          'reserved': 'reserved',
+          'deployed': 'deployed',
+          'retired': 'retired',
+          'broken': 'broken',
+          'deploying': 'deploying',
+          'allocated': 'allocated'
+        }
+        return stringStatusMap[statusCode] || statusCode.toLowerCase() || 'unknown'
+      }
+      
+      console.warn('Unknown status type:', typeof statusCode, statusCode)
+      return 'unknown'
     }
     
     const calculateStorage = (blockDevices) => {
@@ -598,11 +635,96 @@ export default {
       }
     }
     
-    onMounted(() => {
-      loadMachines()
+    // WebSocket 메시지 처리 (실시간 업데이트만)
+    watch(lastMessage, (newMessage) => {
+      if (!newMessage) return
+      
+      console.log('🔔 [WebSocket] 메시지 수신 at', new Date().toLocaleTimeString(), ':', newMessage)
+      
+      // 모든 메시지 타입 로그 출력
+      if (newMessage.type === 2) {
+        console.log('📋 Type 2 메시지 상세:', {
+          name: newMessage.name,
+          action: newMessage.action,
+          hasData: !!newMessage.data,
+          dataKeys: newMessage.data ? Object.keys(newMessage.data) : []
+        })
+        
+        // 머신이 아닌 다른 타입의 메시지도 로그 출력 (디버깅용)
+        if (newMessage.name !== 'machine' && newMessage.data) {
+          console.log('⚠️ Non-machine message:', {
+            name: newMessage.name,
+            action: newMessage.action,
+            data: newMessage.data
+          })
+        }
+      }
+      
+      // 실시간 업데이트만 처리 (type === 2)
+      // name이 'machine'인 경우만 처리
+      if (newMessage.type === 2 && newMessage.data && newMessage.name === 'machine') {
+        console.log('🔍 Processing machine event:', newMessage.name, newMessage.action)
+        const machineData = newMessage.data
+        console.log('🔔 Machine update:', newMessage.action, 'for', machineData.system_id)
+        
+        if (newMessage.action === 'update') {
+          const machineIndex = machines.value.findIndex(m => m.id === machineData.system_id)
+          console.log('🔍 Machine update details:', {
+            system_id: machineData.system_id,
+            found_index: machineIndex,
+            raw_status: machineData.status,
+            status_type: typeof machineData.status,
+            status_message: machineData.status_message
+          })
+          
+          if (machineIndex !== -1) {
+            const oldStatus = machines.value[machineIndex].status
+            const newStatus = getStatusName(machineData.status)
+            
+            machines.value[machineIndex] = {
+              ...machines.value[machineIndex],
+              status: newStatus,
+              status_message: machineData.status_message,
+              power_state: machineData.power_state,
+              hostname: machineData.hostname
+            }
+            console.log(`✅ Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
+          } else {
+            console.log(`❌ Machine not found in list: ${machineData.system_id}`)
+          }
+        } else if (newMessage.action === 'create') {
+          const newMachine = {
+            id: machineData.system_id,
+            hostname: machineData.hostname,
+            status: getStatusName(machineData.status),
+            status_message: machineData.status_message,
+            ip_addresses: machineData.ip_addresses || [],
+            mac_addresses: extractMacAddresses(machineData),
+            architecture: machineData.architecture,
+            cpu_count: machineData.cpu_count || 0,
+            memory: machineData.memory || 0,
+            disk_count: machineData.block_devices?.length || 0,
+            storage: calculateStorage(machineData.block_devices),
+            power_state: machineData.power_state,
+            owner: machineData.owner,
+            tags: machineData.tag_names || [],
+            pool: machineData.pool?.name || 'default',
+            zone: machineData.zone?.name || 'default',
+            fabric: machineData.fabric?.name || '-'
+          }
+          machines.value.unshift(newMachine)
+          console.log('✅ Machine created:', machineData.system_id)
+        } else if (newMessage.action === 'delete') {
+          machines.value = machines.value.filter(m => m.id !== machineData.system_id)
+          console.log('✅ Machine deleted:', machineData.system_id)
+        }
+      }
     })
     
-    // Polling cleanup removed - will be replaced with WebSocket cleanup
+    onMounted(() => {
+      // 초기 로드는 항상 REST API로
+      loadMachines()
+    })
     
       return {
         machines,
@@ -636,17 +758,65 @@ export default {
         // Commission Machine
         commissioningMachines,
         canCommission,
-        commissionMachine
+        commissionMachine,
+        // WebSocket
+        connectionStatus,
+        lastMessage
       }
   }
 }
 </script>
 
 <style scoped>
-.machines h2 {
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 2rem;
+}
+
+.machines h2 {
+  margin: 0;
   color: #2c3e50;
   font-size: 1.8rem;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+}
+
+.status-indicator {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-indicator.connected {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.status-indicator.connecting {
+  background-color: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.status-indicator.error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.status-indicator.disconnected {
+  background-color: #e2e3e5;
+  color: #6c757d;
+  border: 1px solid #d6d8db;
 }
 
 .controls {
