@@ -16,6 +16,7 @@ import org.springframework.web.client.RestTemplate;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -45,18 +46,20 @@ public class MaasWebSocketService {
     private static final String MAAS_PASSWORD = "admin";
     private static final String MAAS_LOGIN_URL = "http://" + MAAS_HOST + "/MAAS/accounts/login/";
     private static final String MAAS_WS_URL = "ws://" + MAAS_HOST + "/MAAS/ws";
-    private static final long HEARTBEAT_INTERVAL = 30000; // 30초
-    private static final long MAX_IDLE_TIME = 300000; // 5분
+    private static final long HEARTBEAT_INTERVAL = 10000; // 10초 (30초 Idle Timeout보다 훨씬 짧게)
+    private static final long MAX_IDLE_TIME = 600000; // 10분 (더 긴 idle 시간)
 
     @PostConstruct
     public void init() {
         try {
             // Jetty WebSocketClient 초기화
             HttpClient httpClient = new HttpClient();
+            httpClient.setIdleTimeout(300000); // 5분 Idle Timeout 설정
             httpClient.start();
             webSocketClient = new WebSocketClient(httpClient);
+            webSocketClient.setIdleTimeout(Duration.ofMinutes(5)); // WebSocketClient 자체 Idle Timeout도 설정
             webSocketClient.start();
-            log.info("Jetty WebSocketClient 초기화 완료");
+            log.info("Jetty WebSocketClient 초기화 완료 - Idle Timeout: 5분");
         } catch (Exception e) {
             log.error("WebSocketClient 초기화 실패", e);
         }
@@ -110,7 +113,7 @@ public class MaasWebSocketService {
         Pattern csrfPattern = Pattern.compile("csrftoken=([^;]+)");
         Pattern sessionPattern = Pattern.compile("sessionid=([^;]+)");
 
-        for (String cookie : responseHeaders.get("Set-Cookie")) {
+        for (String cookie : responseHeaders.getOrDefault("Set-Cookie", new java.util.ArrayList<>())) {
             Matcher csrfMatcher = csrfPattern.matcher(cookie);
             if (csrfMatcher.find()) {
                 this.csrfToken = csrfMatcher.group(1);
@@ -166,21 +169,13 @@ public class MaasWebSocketService {
             shouldReconnect = true; // 연결 성공 시 재연결 플래그 활성화
             lastActivityTime = System.currentTimeMillis();
             
-            // Heartbeat 스케줄러 시작
-            startHeartbeat();
-            
-            // 연결 후 초기 메시지 전송 (socket_gorila 참조)
-            // 실시간 업데이트를 받기 위한 필수 메시지들 전송
-            new Thread(() -> {
-                try {
-                    Thread.sleep(1000); // 1초 대기
-                    sendInitialMessages();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }).start();
-            
-            log.info("MAAS WebSocket 연결 성공!");
+        // Heartbeat 스케줄러 시작
+        startHeartbeat();
+
+        // 초기 구독 메시지 전송
+        sendInitialMessages();
+
+        log.info("MAAS WebSocket 연결 성공!");
 
         } catch (Exception e) {
             log.error("MAAS WebSocket 연결 실패", e);
@@ -209,55 +204,32 @@ public class MaasWebSocketService {
     }
 
     /**
-     * 초기 메시지 전송 (socket_gorila 참조)
-     * 실시간 업데이트를 받기 위한 필수 메시지들 전송
+     * MAAS 서버에 초기 구독 메시지 전송
      */
     private void sendInitialMessages() {
         if (!isConnected()) {
-            log.warn("연결되지 않은 상태에서는 초기 메시지를 전송할 수 없습니다.");
+            log.warn("MAAS WebSocket이 연결되지 않았습니다. 초기 메시지를 전송할 수 없습니다.");
             return;
         }
-        
-        try {
-            long requestId = System.currentTimeMillis();
-            
-            // socket_gorila에서 사용하는 메시지들 전송
-            // 1. user.auth_user
-            String authMessage = String.format(
-                "{\"method\":\"user.auth_user\",\"type\":0,\"request_id\":%d}",
-                requestId++
-            );
-            sendToMaas(authMessage);
-            log.debug("초기 메시지 전송 - user.auth_user");
-            
-            // 2. notification.list
-            String notificationMessage = String.format(
-                "{\"method\":\"notification.list\",\"type\":0,\"request_id\":%d}",
-                requestId++
-            );
-            sendToMaas(notificationMessage);
-            log.debug("초기 메시지 전송 - notification.list");
-            
-            // 3. resourcepool.list
-            String poolMessage = String.format(
-                "{\"method\":\"resourcepool.list\",\"type\":0,\"request_id\":%d}",
-                requestId++
-            );
-            sendToMaas(poolMessage);
-            log.debug("초기 메시지 전송 - resourcepool.list");
-            
-            // 4. machine.list - 이것이 중요! 실시간 업데이트를 받기 위한 구독
-            String machineListMessage = String.format(
-                "{\"method\":\"machine.list\",\"type\":0,\"request_id\":%d,\"params\":{\"filter\":{},\"group_collapsed\":[],\"group_key\":\"status\",\"page_number\":1,\"page_size\":50,\"sort_direction\":\"ascending\",\"sort_key\":\"hostname\"}}",
-                requestId++
-            );
-            sendToMaas(machineListMessage);
-            log.info("✅ 머신 목록 구독 메시지 전송 - 실시간 업데이트 활성화");
-            
-        } catch (Exception e) {
-            log.error("초기 메시지 전송 실패", e);
+
+        log.info("📤 MAAS 서버에 초기 구독 메시지 전송 시작...");
+
+        // MAAS WebSocket API에 맞는 구독 메시지들
+        String[] messages = {
+            "{\"method\":\"user.auth_user\",\"type\":0,\"request_id\":1}",
+            "{\"method\":\"notification.list\",\"type\":0,\"request_id\":2}",
+            "{\"method\":\"resourcepool.list\",\"type\":0,\"request_id\":3}",
+            "{\"method\":\"machine.list\",\"type\":0,\"request_id\":4,\"params\":{\"filter\":{},\"group_collapsed\":[],\"group_key\":\"status\",\"page_number\":1,\"page_size\":50,\"sort_direction\":\"ascending\",\"sort_key\":\"hostname\"}}"
+        };
+
+        for (String message : messages) {
+            sendToMaas(message);
+            log.debug("초기 구독 메시지 전송: {}", message);
         }
+
+        log.info("✅ MAAS 초기 구독 메시지 전송 완료");
     }
+
 
     /**
      * Heartbeat 스케줄러 시작
@@ -288,11 +260,10 @@ public class MaasWebSocketService {
                     return;
                 }
                 
-                // Heartbeat 메시지 전송 (재연결이 필요한 경우에만)
+                // Heartbeat 비활성화 - MAAS 서버가 ping을 지원하지 않아 1002 에러 발생
+                // 대신 연결 상태만 확인하고 필요시 재연결
                 if (isConnected() && shouldReconnect) {
-                    String heartbeatMessage = "{\"method\":\"ping\",\"type\":0,\"request_id\":" + System.currentTimeMillis() + "}";
-                    sendToMaas(heartbeatMessage);
-                    log.debug("Heartbeat 전송: {}", heartbeatMessage);
+                    log.debug("Heartbeat 확인 - 연결 상태: {}", isConnected());
                 } else if (!shouldReconnect) {
                     log.debug("Heartbeat 중단됨 (재연결 불필요)");
                 }
@@ -319,6 +290,7 @@ public class MaasWebSocketService {
             connected = false;
             
             if (maasSession != null && maasSession.isOpen()) {
+                log.info("기존 연결 종료 중...");
                 maasSession.close();
             }
             
@@ -327,11 +299,47 @@ public class MaasWebSocketService {
             
             // 재연결 전에 플래그 다시 확인
             if (shouldReconnect) {
-                connectToMaas(messageCallback);
+                log.info("재연결 시작...");
+                
+                // messageCallback이 null이면 기존 것을 유지
+                Consumer<String> callbackToUse = messageCallback != null ? messageCallback : this.messageCallback;
+                log.info("재연결 시 사용할 messageCallback: {}", callbackToUse != null ? "존재함" : "null");
+                
+                // 직접 재연결
+                connectToMaas(callbackToUse);
+                log.info("재연결 완료 - 연결 상태: {}", isConnected());
+                
+                // 재연결 완료 시 프론트엔드에 재연결 알림 전송
+                if (isConnected()) {
+                    if (callbackToUse != null) {
+                        String reconnectNotification = "{\"type\":\"reconnect\",\"message\":\"WebSocket reconnected - please resubscribe\"}";
+                        callbackToUse.accept(reconnectNotification);
+                        log.info("✅ 재연결 알림 전송 완료 - 프론트엔드에 구독 재시작 요청");
+                        
+                        // 재연결 후 잠시 대기 후 초기 구독 메시지도 전송
+                        new Thread(() -> {
+                            try {
+                                Thread.sleep(2000); // 2초 대기
+                                sendInitialMessages();
+                                log.info("✅ 재연결 후 초기 구독 메시지 전송 완료");
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                        }).start();
+                    } else {
+                        log.error("❌ callbackToUse가 null입니다. 재연결 알림을 전송할 수 없습니다.");
+                    }
+                } else {
+                    log.error("❌ MAAS WebSocket이 연결되지 않았습니다. 재연결 알림을 전송할 수 없습니다.");
+                }
+            } else {
+                log.info("재연결 플래그가 false로 설정됨 - 재연결 중단");
             }
             
         } catch (Exception e) {
             log.error("MAAS 재연결 실패", e);
+            // 재연결 실패 시 shouldReconnect를 false로 설정하여 무한 재연결 방지
+            shouldReconnect = false;
         }
     }
 
@@ -353,44 +361,8 @@ public class MaasWebSocketService {
             // 활동 시간 업데이트
             lastActivityTime = System.currentTimeMillis();
             
-            // JSON 파싱하여 메시지 타입 확인
-            try {
-                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                com.fasterxml.jackson.databind.JsonNode jsonNode = mapper.readTree(message);
-                
-                // pong 메시지는 heartbeat 응답이므로 프론트엔드로 전달하지 않음
-                if (jsonNode.has("method")) {
-                    String method = jsonNode.get("method").asText();
-                    if ("pong".equals(method)) {
-                        log.debug("💓 Pong 메시지 수신 (heartbeat 응답) - 프론트엔드로 전달하지 않음");
-                        return; // pong은 프론트엔드로 전달하지 않음
-                    }
-                }
-                
-                if (jsonNode.has("name")) {
-                    String name = jsonNode.get("name").asText();
-                    String action = jsonNode.has("action") ? jsonNode.get("action").asText() : "N/A";
-                    int type = jsonNode.has("type") ? jsonNode.get("type").asInt() : -1;
-                    
-                    log.info("📋 메시지 분석 - name: {}, action: {}, type: {}", name, action, type);
-                    
-                    if ("machine".equals(name)) {
-                        log.info("✅ 머신 이벤트 수신! action: {}, full message: {}", action, message);
-                        if (jsonNode.has("data")) {
-                            com.fasterxml.jackson.databind.JsonNode data = jsonNode.get("data");
-                            if (data.has("system_id")) {
-                                log.info("✅ 머신 system_id: {}, status: {}", 
-                                    data.get("system_id").asText(),
-                                    data.has("status") ? data.get("status").asText() : "N/A");
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                log.debug("메시지 파싱 실패 (비JSON 메시지일 수 있음): {}", e.getMessage());
-            }
-            
-            // pong이 아닌 메시지만 프론트엔드로 전달
+            // socket_gorila 방식: 모든 메시지를 프론트엔드로 전달
+            // 프론트엔드에서 필요한 메시지만 필터링하여 처리
             if (messageCallback != null) {
                 messageCallback.accept(message);
             }
@@ -413,21 +385,27 @@ public class MaasWebSocketService {
             
             // 특정 에러 코드는 재연결하지 않음
             // 1000 = 정상 종료 (클로즈 프레임)
-            // 1002 = Protocol Error (Invalid method formatting 등) - 재연결해도 같은 문제 반복
             // 1003 = Unsupported Data (데이터 타입 오류)
             // 1007 = Invalid frame payload data (프레임 데이터 오류)
-            if (statusCode == 1000 || statusCode == 1002 || statusCode == 1003 || statusCode == 1007) {
+            if (statusCode == 1000 || statusCode == 1003 || statusCode == 1007) {
                 log.warn("에러 코드 {}: 재연결하지 않음 (재연결해도 같은 문제가 반복될 수 있음)", statusCode);
                 shouldReconnect = false;
                 return;
             }
             
-            // 그 외의 비정상 종료인 경우에만 재연결 시도
-            if (shouldReconnect) {
-                log.info("비정상 종료 감지 - 재연결 시도 예정 (5초 후)");
+            // 1002 (Protocol Error)와 1001 (Idle Timeout)은 재연결 시도
+            if (statusCode == 1002) {
+                log.warn("에러 코드 {}: Protocol Error - 재연결 시도", statusCode);
+            } else if (statusCode == 1001) {
+                log.warn("에러 코드 {}: Idle Timeout - 재연결 시도", statusCode);
+            }
+            
+            // 1002, 1001 에러나 그 외의 비정상 종료인 경우 재연결 시도
+            if (shouldReconnect && (statusCode == 1002 || statusCode == 1001 || statusCode != 1000)) {
+                log.info("비정상 종료 감지 - 재연결 시도 예정 (3초 후)");
                 new Thread(() -> {
                     try {
-                        Thread.sleep(5000);
+                        Thread.sleep(3000); // 3초 후 재연결
                         // 재연결 전에 연결 상태 다시 확인
                         if (!isConnected() && shouldReconnect) {
                             log.info("MAAS WebSocket 재연결 시도...");

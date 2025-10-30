@@ -11,8 +11,8 @@ export function useWebSocket() {
 
   const WS_URL = 'ws://localhost:8081/ws' // 백엔드 WebSocket 엔드포인트
   const RECONNECT_DELAY = 5000 // 5초 후 재연결
-  const HEARTBEAT_INTERVAL = 30000 // 30초마다 Heartbeat
-  const MAX_IDLE_TIME = 300000 // 5분 (300초)
+  const HEARTBEAT_INTERVAL = 60000 // 60초마다 Heartbeat (더 긴 간격)
+  const MAX_IDLE_TIME = 600000 // 10분 (더 긴 idle 시간)
 
   const connect = () => {
     if (socket.value && (socket.value.readyState === WebSocket.OPEN || socket.value.readyState === WebSocket.CONNECTING)) {
@@ -27,13 +27,17 @@ export function useWebSocket() {
       socket.value = new WebSocket(WS_URL)
 
       socket.value.onopen = () => {
-        console.log('WebSocket connected!')
+        console.log('✅ WebSocket connected!')
         connectionStatus.value = 'connected'
         lastActivityTime = Date.now()
         if (reconnectInterval) {
           clearInterval(reconnectInterval)
           reconnectInterval = null
         }
+        
+        // socket_gorila 방식: 연결 즉시 초기 구독 메시지 전송
+        sendInitialMessages()
+        
         startHeartbeat()
       }
 
@@ -42,9 +46,13 @@ export function useWebSocket() {
         try {
           const message = JSON.parse(event.data)
           
-          // pong 메시지는 lastMessage에 저장하지 않음 (heartbeat 응답)
-          if (message.method === 'pong') {
-            console.log('💓 [WebSocket] Pong received at', new Date().toLocaleTimeString())
+          // 재연결 알림 감지 시 구독 메시지 재전송
+          if (message.type === 'reconnect') {
+            console.log('🔄 WebSocket 재연결 감지 - 구독 메시지 재전송')
+            // 잠시 대기 후 구독 메시지 전송 (연결이 완전히 안정화될 때까지)
+            setTimeout(() => {
+              sendInitialMessages()
+            }, 1000)
             return
           }
           
@@ -67,8 +75,15 @@ export function useWebSocket() {
         console.warn('WebSocket disconnected:', event.code, event.reason)
         connectionStatus.value = 'disconnected'
         stopHeartbeat()
-        if (!reconnectInterval) {
-          reconnectInterval = setInterval(connect, RECONNECT_DELAY)
+        
+        // 1002 (Protocol Error)나 1001 (Idle Timeout) 등은 재연결 시도
+        if (event.code === 1002 || event.code === 1001 || event.code !== 1000) {
+          console.log(`WebSocket 에러 코드 ${event.code} - 재연결 시도`)
+          if (!reconnectInterval) {
+            reconnectInterval = setInterval(connect, RECONNECT_DELAY)
+          }
+        } else {
+          console.log(`WebSocket 정상 종료 (코드: ${event.code}) - 재연결하지 않음`)
         }
       }
     } catch (e) {
@@ -88,6 +103,45 @@ export function useWebSocket() {
     }
   }
 
+  // socket_gorila 방식: 초기 구독 메시지 전송
+  const sendInitialMessages = () => {
+    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) {
+      console.warn('WebSocket이 연결되지 않았습니다. 초기 메시지를 전송할 수 없습니다.')
+      return
+    }
+
+    console.log('📤 초기 구독 메시지 전송 시작...')
+
+    // 실시간 업데이트를 받기 위한 필수 메시지들 전송
+    const messages = [
+      { method: "user.auth_user", type: 0, request_id: 1 },
+      { method: "notification.list", type: 0, request_id: 2 },
+      { method: "resourcepool.list", type: 0, request_id: 3 },
+      // 머신 목록을 구독하여 실시간 업데이트 받기
+      { 
+        method: "machine.list", 
+        type: 0, 
+        request_id: 4,
+        params: {
+          filter: {},
+          group_collapsed: [],
+          group_key: "status",
+          page_number: 1,
+          page_size: 50,
+          sort_direction: "ascending",
+          sort_key: "hostname"
+        }
+      },
+    ]
+    
+    messages.forEach((msg, index) => {
+      console.log(`📤 구독 메시지 ${index + 1} 전송:`, msg.method)
+      sendMessage(JSON.stringify(msg))
+    })
+    
+    console.log('✅ WebSocket 구독 완료 (머신, 리소스풀, 알림 실시간 업데이트 활성화)')
+  }
+
   const startHeartbeat = () => {
     stopHeartbeat() // 기존 Heartbeat 중지
     heartbeatInterval = setInterval(() => {
@@ -101,8 +155,9 @@ export function useWebSocket() {
       }
 
       if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-        // 백엔드에 Heartbeat 메시지 전송
-        sendMessage(JSON.stringify({ method: "ping", type: 0, request_id: Date.now() }))
+        // Heartbeat 비활성화 - MAAS 서버가 ping을 지원하지 않아 1002 에러 발생
+        // 대신 연결 상태만 확인
+        console.debug('Heartbeat 확인 - 연결 상태:', socket.value.readyState === WebSocket.OPEN)
       }
     }, HEARTBEAT_INTERVAL)
   }

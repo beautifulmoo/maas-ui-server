@@ -641,6 +641,18 @@ export default {
       
       console.log('🔔 [WebSocket] 메시지 수신 at', new Date().toLocaleTimeString(), ':', newMessage)
       
+      // 재연결 알림 처리
+      if (newMessage.type === 'reconnect') {
+        console.log('🔄 [WebSocket] 재연결 감지 - machine 상태 업데이트 재시작')
+        return
+      }
+      
+      // pong 메시지는 heartbeat 응답이므로 처리하지 않음
+      if (newMessage.method === 'pong') {
+        console.log('💓 [WebSocket] Pong received at', new Date().toLocaleTimeString())
+        return
+      }
+      
       // 모든 메시지 타입 로그 출력
       if (newMessage.type === 2) {
         console.log('📋 Type 2 메시지 상세:', {
