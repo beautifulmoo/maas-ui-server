@@ -11,7 +11,7 @@
             id="maas-url"
             type="text" 
             v-model="settings.maasUrl" 
-            placeholder="http://192.168.18.71:5240"
+            placeholder="http://192.168.189.71:5240"
             class="form-input"
           >
         </div>
@@ -97,45 +97,28 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useSettings } from '../composables/useSettings'
 
 export default {
   name: 'SettingsTab',
   setup() {
     const testing = ref(false)
     const connectionStatus = ref(null)
-    const settings = reactive({
-      maasUrl: 'http://192.168.18.71:5240',
-      apiKey: '',
-      refreshInterval: 30,
-      autoRefresh: true,
-      itemsPerPage: 25,
-      showAdvancedInfo: false
-    })
     
-    const loadSettings = () => {
-      // Load settings from localStorage or default values
-      const savedSettings = localStorage.getItem('maas-ui-settings')
-      if (savedSettings) {
-        Object.assign(settings, JSON.parse(savedSettings))
+    // useSettings composable 사용
+    const { settings, save, reset, refresh } = useSettings()
+    
+    const saveSettings = () => {
+      if (save()) {
+        showMessage('Settings saved successfully!', 'success')
+      } else {
+        showMessage('Failed to save settings!', 'error')
       }
     }
     
-    const saveSettings = () => {
-      localStorage.setItem('maas-ui-settings', JSON.stringify(settings))
-      showMessage('Settings saved successfully!', 'success')
-    }
-    
     const resetSettings = () => {
-      Object.assign(settings, {
-        maasUrl: 'http://192.168.18.71:5240',
-        apiKey: '',
-        refreshInterval: 30,
-        autoRefresh: true,
-        itemsPerPage: 25,
-        showAdvancedInfo: false
-      })
-      localStorage.removeItem('maas-ui-settings')
+      reset()
       showMessage('Settings reset to defaults!', 'info')
     }
     
@@ -180,7 +163,8 @@ export default {
     }
     
     onMounted(() => {
-      loadSettings()
+      // 설정 새로고침 (localStorage에서 로드)
+      refresh()
     })
     
     return {

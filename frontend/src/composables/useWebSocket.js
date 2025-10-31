@@ -11,7 +11,7 @@ export function useWebSocket() {
 
   const WS_URL = 'ws://localhost:8081/ws' // 백엔드 WebSocket 엔드포인트
   const RECONNECT_DELAY = 5000 // 5초 후 재연결
-  const HEARTBEAT_INTERVAL = 60000 // 60초마다 Heartbeat (더 긴 간격)
+  const HEARTBEAT_INTERVAL = 60000 // 60초마다 Heartbeat (1분)
   const MAX_IDLE_TIME = 600000 // 10분 (더 긴 idle 시간)
 
   const connect = () => {
@@ -156,8 +156,7 @@ export function useWebSocket() {
 
       if (socket.value && socket.value.readyState === WebSocket.OPEN) {
         // Heartbeat 비활성화 - MAAS 서버가 ping을 지원하지 않아 1002 에러 발생
-        // 대신 연결 상태만 확인
-        console.debug('Heartbeat 확인 - 연결 상태:', socket.value.readyState === WebSocket.OPEN)
+        // 대신 연결 상태만 확인 (콘솔 로그 제거)
       }
     }, HEARTBEAT_INTERVAL)
   }

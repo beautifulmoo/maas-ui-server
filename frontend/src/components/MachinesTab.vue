@@ -36,8 +36,8 @@
               <button class="btn-primary add-machine-btn" @click="showAddMachineModal">
                 <span class="btn-icon">+</span>
                 Add Machine
-              </button>
-            </div>
+        </button>
+      </div>
     </div>
     
     <div class="loading" v-if="loading">
@@ -135,16 +135,20 @@
             </td>
                    <td class="actions-col">
                      <div class="action-buttons">
-                       <button class="btn-small btn-primary" @click="viewDetails(machine)">
-                         View
-                       </button>
                        <button 
-                         class="btn-small btn-success" 
-                         @click="commissionMachine(machine)"
-                         :disabled="!canCommission(machine) || commissioningMachines.includes(machine.id)"
+                         class="btn-small"
+                         :class="machine.status === 'commissioning' ? 'btn-warning' : 'btn-success'"
+                         @click="machine.status === 'commissioning' ? abortCommissioning(machine) : commissionMachine(machine)"
+                         :disabled="machine.status === 'commissioning' ? abortingMachines.includes(machine.id) : (!canCommission(machine) || commissioningMachines.includes(machine.id))"
                        >
-                         <span v-if="commissioningMachines.includes(machine.id)">...</span>
-                         <span v-else>Commission</span>
+                         <span v-if="machine.status === 'commissioning'">
+                           <span v-if="abortingMachines.includes(machine.id)">...</span>
+                           <span v-else>Abort</span>
+                         </span>
+                         <span v-else>
+                           <span v-if="commissioningMachines.includes(machine.id)">...</span>
+                           <span v-else>Commission</span>
+                         </span>
                        </button>
                      </div>
                    </td>
@@ -260,6 +264,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useWebSocket } from '../composables/useWebSocket'
+import { useSettings } from '../composables/useSettings'
 
 export default {
   name: 'MachinesTab',
@@ -276,7 +281,15 @@ export default {
     const itemsPerPage = ref(25)
     
     // WebSocket 연결
+    // ⚠️ 중요: useWebSocket()은 반드시 최상단에서 먼저 호출해야 함
+    // useSettings() 등 다른 composable 호출보다 먼저 호출하여 watch() 의존성 수집에 영향을 주지 않도록 함
     const { connectionStatus, lastMessage, sendMessage } = useWebSocket()
+    
+    // 설정 로드 (lazy 로딩을 위해 함수로 사용)
+    // ⚠️ 주의: useSettings()는 reactive 객체를 생성하므로 watch() 등록 전에 호출해도
+    //           WebSocket watch 로직과 분리되어야 함. settingsStore 객체를 직접 참조하지 말고
+    //           필요할 때만 getApiParams.value를 사용하도록 함
+    const settingsStore = useSettings()
     
     // Add Machine Modal
     const showAddModal = ref(false)
@@ -293,6 +306,7 @@ export default {
     
     // Commission Machine
     const commissioningMachines = ref([])
+    const abortingMachines = ref([])
     
     const filteredMachines = computed(() => {
       let filtered = machines.value
@@ -331,10 +345,7 @@ export default {
         
         // REST API로 머신 목록 가져오기
         const response = await axios.get('http://localhost:8081/api/machines', {
-          params: {
-            maasUrl: 'http://192.168.189.71:5240',
-            apiKey: '0CaFHNt9yHWIJWcijm:OGpxrpkB9nCOVhhrvL:GqcGMp8URhJp8zmDQu2x100OHbSFkJic'
-          }
+          params: settingsStore.getApiParams.value
         })
         
         if (response.data && response.data.results) {
@@ -555,8 +566,9 @@ export default {
         if (newMachine.value.description) {
           formData.append('description', newMachine.value.description)
         }
-        formData.append('maasUrl', 'http://192.168.189.71:5240')
-        formData.append('apiKey', '0CaFHNt9yHWIJWcijm:OGpxrpkB9nCOVhhrvL:GqcGMp8URhJp8zmDQu2x100OHbSFkJic')
+        const apiParams = settingsStore.getApiParams.value
+        formData.append('maasUrl', apiParams.maasUrl)
+        formData.append('apiKey', apiParams.apiKey)
         
         const response = await axios.post('http://localhost:8081/api/machines', formData, {
           headers: {
@@ -599,8 +611,9 @@ export default {
       try {
         const formData = new FormData()
         formData.append('skipBmcConfig', '1')
-        formData.append('maasUrl', 'http://192.168.189.71:5240')
-        formData.append('apiKey', '0CaFHNt9yHWIJWcijm:OGpxrpkB9nCOVhhrvL:GqcGMp8URhJp8zmDQu2x100OHbSFkJic')
+        const apiParams = settingsStore.getApiParams.value
+        formData.append('maasUrl', apiParams.maasUrl)
+        formData.append('apiKey', apiParams.apiKey)
         
         const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/commission`, formData, {
           headers: {
@@ -635,7 +648,47 @@ export default {
       }
     }
     
+    // Abort Commissioning
+    const abortCommissioning = async (machine) => {
+      if (machine.status !== 'commissioning') {
+        return
+      }
+      
+      abortingMachines.value.push(machine.id)
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/abort`, null, {
+          params: {
+            maasUrl: apiParams.maasUrl,
+            apiKey: apiParams.apiKey
+          }
+        })
+        
+        if (response.data && response.data.success) {
+          console.log('Machine commissioning aborted successfully:', response.data)
+          // Status will be updated via WebSocket
+        } else {
+          error.value = response.data?.error || 'Failed to abort commissioning'
+        }
+        
+      } catch (err) {
+        console.error('Error aborting commissioning:', err)
+        error.value = err.response?.data?.error || err.message || 'Failed to abort commissioning'
+      } finally {
+        // Remove from aborting list
+        const index = abortingMachines.value.indexOf(machine.id)
+        if (index > -1) {
+          abortingMachines.value.splice(index, 1)
+        }
+      }
+    }
+    
     // WebSocket 메시지 처리 (실시간 업데이트만)
+    // ⚠️ 중요: 이 watch()는 useWebSocket()의 lastMessage를 감시함
+    //           - useSettings() 등 다른 reactive 객체와 섞이지 않도록 주의
+    //           - watch()는 반드시 useWebSocket() 호출 이후에 등록되어야 함
+    //           - 이 로직을 수정할 때는 반드시 WebSocket 연결 및 메시지 수신 로직을 함께 확인해야 함
     watch(lastMessage, (newMessage) => {
       if (!newMessage) return
       
@@ -756,8 +809,6 @@ export default {
         extractMacAddresses,
         getStatusText,
         toggleSelectAll,
-        viewDetails,
-        showActions,
         // Add Machine Modal
         showAddModal,
         addingMachine,
@@ -769,8 +820,10 @@ export default {
         addMachine,
         // Commission Machine
         commissioningMachines,
+        abortingMachines,
         canCommission,
         commissionMachine,
+        abortCommissioning,
         // WebSocket
         connectionStatus,
         lastMessage

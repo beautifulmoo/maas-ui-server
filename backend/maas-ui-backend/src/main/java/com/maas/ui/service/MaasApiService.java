@@ -90,6 +90,46 @@ public class MaasApiService {
     }
     
     /**
+     * MAAS 서버에서 머신의 커미셔닝을 중단합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return 중단 결과
+     */
+    public Mono<Map<String, Object>> abortCommissioning(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-abort";
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> result = mapper.readValue(responseBody, Map.class);
+                        result.put("success", true);
+                        return result;
+                    } catch (Exception e) {
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "Failed to parse response: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    errorResult.put("error", "Failed to abort commissioning: " + e.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
      * MAAS 서버 연결을 테스트합니다.
      * 
      * @param maasUrl MAAS 서버 URL

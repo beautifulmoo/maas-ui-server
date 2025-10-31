@@ -46,7 +46,7 @@ public class MaasWebSocketService {
     private static final String MAAS_PASSWORD = "admin";
     private static final String MAAS_LOGIN_URL = "http://" + MAAS_HOST + "/MAAS/accounts/login/";
     private static final String MAAS_WS_URL = "ws://" + MAAS_HOST + "/MAAS/ws";
-    private static final long HEARTBEAT_INTERVAL = 10000; // 10초 (30초 Idle Timeout보다 훨씬 짧게)
+    private static final long HEARTBEAT_INTERVAL = 60000; // 60초 (1분)
     private static final long MAX_IDLE_TIME = 600000; // 10분 (더 긴 idle 시간)
 
     @PostConstruct
@@ -261,11 +261,11 @@ public class MaasWebSocketService {
                 }
                 
                 // Heartbeat 비활성화 - MAAS 서버가 ping을 지원하지 않아 1002 에러 발생
-                // 대신 연결 상태만 확인하고 필요시 재연결
+                // 대신 연결 상태만 확인하고 필요시 재연결 (로그 제거)
                 if (isConnected() && shouldReconnect) {
-                    log.debug("Heartbeat 확인 - 연결 상태: {}", isConnected());
+                    // 연결 상태 확인만 수행 (로그 없음)
                 } else if (!shouldReconnect) {
-                    log.debug("Heartbeat 중단됨 (재연결 불필요)");
+                    // 재연결 불필요 (로그 없음)
                 }
                 
             } catch (Exception e) {

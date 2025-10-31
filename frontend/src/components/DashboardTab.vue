@@ -40,6 +40,7 @@
 <script>
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import { useSettings } from '../composables/useSettings'
 
 export default {
   name: 'DashboardTab',
@@ -50,6 +51,9 @@ export default {
     const loading = ref(true)
     const error = ref(null)
     
+    // 설정 로드
+    const { getApiParams } = useSettings()
+    
     const loadMachineStats = async () => {
       try {
         loading.value = true
@@ -57,10 +61,7 @@ export default {
         
         // 실제 백엔드 API 호출
         const response = await axios.get('http://localhost:8081/api/dashboard/stats', {
-          params: {
-            maasUrl: 'http://192.168.189.71:5240',
-            apiKey: '0CaFHNt9yHWIJWcijm:OGpxrpkB9nCOVhhrvL:GqcGMp8URhJp8zmDQu2x100OHbSFkJic'
-          }
+          params: getApiParams.value
         })
         
         if (response.data) {

@@ -143,6 +143,26 @@ public class MaasController {
     }
     
     /**
+     * 머신의 커미셔닝을 중단합니다.
+     */
+    @PostMapping("/machines/{systemId}/abort")
+    public Mono<ResponseEntity<Map<String, Object>>> abortCommissioning(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.abortCommissioning(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to abort commissioning")));
+    }
+    
+    /**
      * 헬스 체크 엔드포인트
      */
     @GetMapping("/health")
