@@ -150,6 +150,12 @@
                            <span v-else>Commission</span>
                          </span>
                        </button>
+                       <button 
+                         class="btn-small btn-primary"
+                         @click="showNetworkModal(machine)"
+                       >
+                         Network
+                       </button>
                      </div>
                    </td>
           </tr>
@@ -177,6 +183,173 @@
         </select>
           </div>
           </div>
+
+    <!-- Network Modal -->
+    <div v-if="showNetworkModalState" class="modal-overlay" @click="closeNetworkModal">
+      <div class="modal-content network-modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>Network Configuration - {{ selectedMachine?.hostname || selectedMachine?.id }}</h3>
+          <button class="close-btn" @click="closeNetworkModal">&times;</button>
+        </div>
+        
+        <div class="network-modal-body">
+          <div v-if="loadingNetwork" class="loading">
+            <p>Loading network information...</p>
+          </div>
+          
+          <div v-else-if="networkError" class="error">
+            <p>{{ networkError }}</p>
+          </div>
+          
+          <div v-else-if="networkInterfaces.length === 0" class="no-interfaces">
+            <p>No network interfaces found.</p>
+          </div>
+          
+          <div v-else class="network-interfaces-list">
+            <div 
+              v-for="(networkInterface, index) in networkInterfaces" 
+              :key="networkInterface.id || index"
+              class="network-interface-item"
+            >
+              <div class="interface-header">
+                <div class="interface-title-section">
+                  <h4>{{ networkInterface.name || `Interface ${index + 1}` }}</h4>
+                  <span class="interface-id">
+                    ID: {{ networkInterface.id || '알 수 없음' }}
+                  </span>
+                </div>
+                <span class="interface-type">{{ networkInterface.type || 'Unknown' }}</span>
+              </div>
+              
+              <div class="interface-details">
+                <div class="form-group">
+                  <label>MAC Address</label>
+                  <input 
+                    type="text" 
+                    :value="networkInterface.mac_address || 'N/A'"
+                    class="form-input"
+                    readonly
+                  >
+                </div>
+                
+                <div class="form-group">
+                  <label>Fabric</label>
+                  <select 
+                    v-model.number="networkInterface.editableFabric"
+                    class="form-select"
+                    @change="updateFabricForInterface(networkInterface)"
+                  >
+                    <option :value="null">Select Fabric</option>
+                    <option 
+                      v-for="fabric in availableFabrics" 
+                      :key="fabric.id"
+                      :value="fabric.id"
+                    >
+                      {{ fabric.name }} (id: {{ fabric.id }}, type: {{ typeof fabric.id }})
+                    </option>
+                  </select>
+                  <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                    <div>Selected editableFabric: {{ networkInterface.editableFabric }} (type: {{ typeof networkInterface.editableFabric }})</div>
+                    <div v-if="networkInterface.vlan">
+                      Original vlan: fabric_id={{ networkInterface.vlan.fabric_id }}, fabric={{ networkInterface.vlan.fabric }}
+                    </div>
+                  </div>
+                  <span class="current-value" v-if="networkInterface.vlan && networkInterface.vlan.fabric">
+                    Current: {{ networkInterface.vlan.fabric }}
+                  </span>
+                </div>
+                
+                <div class="form-group">
+                  <label>IP Address (Primary)</label>
+                  <div class="ip-address-primary">
+                    <input 
+                      type="text" 
+                      v-model="networkInterface.primaryIpAddress"
+                      :placeholder="networkInterface.matchedSubnet ? `예: ${getDefaultIpExample(networkInterface.matchedSubnet.cidr)}` : 'IP 주소 입력'"
+                      class="form-input"
+                      :class="{ 'ip-invalid': networkInterface.primaryIpInvalid }"
+                      @input="validatePrimaryIpAddress(networkInterface)"
+                      @blur="validatePrimaryIpAddress(networkInterface)"
+                    >
+                    <span class="ip-validation-message" v-if="networkInterface.primaryIpInvalid">
+                      유효하지 않은 IP 주소입니다
+                    </span>
+                    <span class="ip-subnet" v-if="networkInterface.matchedSubnet">
+                      Subnet: {{ networkInterface.matchedSubnet.cidr }}
+                    </span>
+                  </div>
+                </div>
+                
+                <div class="form-group" v-if="networkInterface.secondaryIpAddresses && networkInterface.secondaryIpAddresses.length > 0">
+                  <label>IP Address (Secondary)</label>
+                  <div 
+                    v-for="(secondaryIp, secIndex) in networkInterface.secondaryIpAddresses" 
+                    :key="secIndex"
+                    class="ip-address-secondary-item"
+                  >
+                    <div class="secondary-ip-input-group">
+                      <input 
+                        type="text" 
+                        v-model="secondaryIp.address"
+                        :placeholder="secondaryIp.subnet ? `예: ${getDefaultIpExample(secondaryIp.subnet.cidr)}` : 'IP 주소 입력'"
+                        class="form-input"
+                        :class="{ 'ip-invalid': secondaryIp.invalid }"
+                        @input="validateSecondaryIpAddress(networkInterface, secIndex)"
+                        @blur="validateSecondaryIpAddress(networkInterface, secIndex)"
+                      >
+                      <button 
+                        type="button"
+                        class="btn-remove-secondary"
+                        @click="removeSecondaryIp(networkInterface, secIndex)"
+                        title="Remove Secondary IP"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <span class="ip-validation-message" v-if="secondaryIp.invalid">
+                      유효하지 않은 IP 주소입니다
+                    </span>
+                    <span class="ip-subnet" v-if="secondaryIp.subnet">
+                      Subnet: {{ secondaryIp.subnet.cidr }}
+                    </span>
+                  </div>
+                </div>
+                
+                <div class="form-group">
+                  <button 
+                    type="button"
+                    class="btn-add-secondary"
+                    @click="addSecondaryIp(networkInterface)"
+                  >
+                    + Add Secondary IP
+                  </button>
+                </div>
+                
+                <div class="form-group" v-if="networkInterface.vlan">
+                  <label>VLAN</label>
+                  <input 
+                    type="text" 
+                    :value="networkInterface.vlan.name || networkInterface.vlan || 'N/A'"
+                    class="form-input"
+                    readonly
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-actions">
+            <button type="button" class="btn-secondary" @click="closeNetworkModal">
+              Cancel
+            </button>
+            <button type="button" class="btn-primary" @click="saveNetworkChanges" :disabled="savingNetwork">
+              <span v-if="savingNetwork">Saving...</span>
+              <span v-else>Save Changes</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Add Machine Modal -->
     <div v-if="showAddModal" class="modal-overlay" @click="closeAddMachineModal">
@@ -308,6 +481,17 @@ export default {
     const commissioningMachines = ref([])
     const abortingMachines = ref([])
     
+    // Network Modal
+    const showNetworkModalState = ref(false)
+    const selectedMachine = ref(null)
+    const networkInterfaces = ref([])
+    const loadingNetwork = ref(false)
+    const networkError = ref(null)
+    const savingNetwork = ref(false)
+    const availableFabrics = ref([])
+    const availableSubnets = ref([])
+    const fabricVlanMap = ref({}) // fabric id -> vlan_id mapping
+    
     const filteredMachines = computed(() => {
       let filtered = machines.value
       
@@ -335,6 +519,48 @@ export default {
     const totalPages = computed(() => {
       return Math.ceil(filteredMachines.value.length / itemsPerPage.value)
     })
+    
+    // 개별 머신 정보를 가져와서 업데이트하는 함수
+    const refreshMachineDetails = async (systemId) => {
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const response = await axios.get(`http://localhost:8081/api/machines/${systemId}`, {
+          params: apiParams
+        })
+        
+        if (response.data && !response.data.error) {
+          const machineData = response.data
+          const machineIndex = machines.value.findIndex(m => m.id === systemId)
+          
+          if (machineIndex !== -1) {
+            // 기존 머신 정보를 업데이트 (interface_set 포함)
+            machines.value[machineIndex] = {
+              ...machines.value[machineIndex],
+              hostname: machineData.hostname,
+              status: getStatusName(machineData.status),
+              status_message: machineData.status_message,
+              ip_addresses: machineData.ip_addresses || [],
+              mac_addresses: extractMacAddresses(machineData),
+              architecture: machineData.architecture,
+              cpu_count: machineData.cpu_count || 0,
+              memory: machineData.memory || 0,
+              disk_count: machineData.block_devices?.length || 0,
+              storage: calculateStorage(machineData.block_devices),
+              power_state: machineData.power_state,
+              owner: machineData.owner,
+              tags: machineData.tag_names || [],
+              pool: machineData.pool?.name || 'default',
+              zone: machineData.zone?.name || 'default',
+              fabric: machineData.fabric?.name || '-',
+              interface_set: machineData.interface_set || [] // 네트워크 인터페이스 정보 업데이트
+            }
+            console.log(`✅ Machine details refreshed for: ${systemId}`)
+          }
+        }
+      } catch (err) {
+        console.error(`Error refreshing machine details for ${systemId}:`, err)
+      }
+    }
     
     const loadMachines = async () => {
       loading.value = true
@@ -367,7 +593,8 @@ export default {
             tags: machine.tag_names || [],
             pool: machine.pool?.name || 'default',
             zone: machine.zone?.name || 'default',
-            fabric: machine.fabric?.name || '-'
+            fabric: machine.fabric?.name || '-',
+            interface_set: machine.interface_set || [] // 네트워크 인터페이스 정보 저장
           }))
           console.log(`✅ Loaded ${machines.value.length} machines via REST API`)
         } else {
@@ -684,6 +911,720 @@ export default {
       }
     }
     
+    // CIDR에서 네트워크 부분 추출 (예: "192.168.189.0/24" -> "192.168.189.")
+    const extractNetworkPrefix = (cidr) => {
+      if (!cidr) return ''
+      const parts = cidr.split('/')
+      if (parts.length !== 2) return ''
+      
+      const ipParts = parts[0].split('.')
+      if (ipParts.length !== 4) return ''
+      
+      const subnetMask = parseInt(parts[1])
+      if (subnetMask < 0 || subnetMask > 32) return ''
+      
+      // 서브넷 마스크에 따라 표시할 옥텟 수 계산
+      const octetsToShow = Math.floor(subnetMask / 8)
+      
+      if (octetsToShow === 0) return ''
+      if (octetsToShow >= 4) return '' // /32 이상은 전체 IP가 네트워크
+      
+      // 옥텟들을 조인하고 마지막에 점 추가
+      const prefix = ipParts.slice(0, octetsToShow).join('.') + '.'
+      return prefix
+    }
+    
+    // IP 주소에서 호스트 부분 추출
+    const extractHostPart = (ipAddress) => {
+      if (!ipAddress) return ''
+      const parts = ipAddress.split('.')
+      if (parts.length === 4) {
+        // 마지막 옥텟만 반환
+        return parts[3]
+      }
+      return ''
+    }
+    
+    // IP 주소 유효성 검사
+    const isValidIpAddress = (ipAddress) => {
+      if (!ipAddress) return false
+      const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+      return ipRegex.test(ipAddress)
+    }
+    
+    // CIDR에서 기본 IP 예시 생성 (예: "192.168.189.0/24" -> "192.168.189.100")
+    const getDefaultIpExample = (cidr) => {
+      if (!cidr) return '192.168.1.100'
+      const parts = cidr.split('/')
+      if (parts.length !== 2) return '192.168.1.100'
+      
+      const ipParts = parts[0].split('.')
+      if (ipParts.length !== 4) return '192.168.1.100'
+      
+      // 마지막 옥텟을 100으로 설정한 예시 IP 반환
+      return `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.100`
+    }
+    
+    // Primary IP 주소 유효성 검사
+    const validatePrimaryIpAddress = (networkInterface) => {
+      if (!networkInterface) {
+        networkInterface.primaryIpInvalid = false
+        return
+      }
+      
+      const ipAddress = networkInterface.primaryIpAddress || ''
+      if (!ipAddress) {
+        networkInterface.primaryIpInvalid = false
+        return
+      }
+      
+      networkInterface.primaryIpInvalid = !isValidIpAddress(ipAddress)
+    }
+    
+    // Secondary IP 주소 유효성 검사
+    const validateSecondaryIpAddress = (networkInterface, secIndex) => {
+      if (!networkInterface || !networkInterface.secondaryIpAddresses) {
+        return
+      }
+      
+      const secondaryIp = networkInterface.secondaryIpAddresses[secIndex]
+      if (!secondaryIp) {
+        return
+      }
+      
+      const ipAddress = secondaryIp.address || ''
+      if (!ipAddress) {
+        secondaryIp.invalid = false
+        return
+      }
+      
+      secondaryIp.invalid = !isValidIpAddress(ipAddress)
+    }
+    
+    // Secondary IP 추가
+    const addSecondaryIp = (networkInterface) => {
+      if (!networkInterface.secondaryIpAddresses) {
+        networkInterface.secondaryIpAddresses = []
+      }
+      
+      // Secondary IP 추가 시 subnet 자동 매칭하지 않음 (사용자가 직접 선택)
+      networkInterface.secondaryIpAddresses.push({
+        address: '',
+        subnet: null,
+        invalid: false
+      })
+    }
+    
+    // Secondary IP 제거
+    const removeSecondaryIp = (networkInterface, secIndex) => {
+      if (networkInterface.secondaryIpAddresses && networkInterface.secondaryIpAddresses.length > secIndex) {
+        networkInterface.secondaryIpAddresses.splice(secIndex, 1)
+      }
+    }
+    
+    // Network Modal Functions
+    const showNetworkModal = async (machine) => {
+      selectedMachine.value = machine
+      showNetworkModalState.value = true
+      loadingNetwork.value = true
+      networkError.value = null
+      networkInterfaces.value = []
+      availableFabrics.value = []
+      availableSubnets.value = []
+      fabricVlanMap.value = {}
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        
+        // 최신 머신 정보 가져오기 (네트워크 정보 포함)
+        console.log(`🔄 [Network Modal] Fetching latest machine info for: ${machine.id}`)
+        const machineResponse = await axios.get(`http://localhost:8081/api/machines/${machine.id}`, {
+          params: apiParams
+        })
+        
+        if (machineResponse.data && machineResponse.data.error) {
+          throw new Error(machineResponse.data.error)
+        }
+        
+        // 최신 머신 정보 사용
+        const latestMachine = machineResponse.data
+        if (!latestMachine || !latestMachine.interface_set) {
+          throw new Error('Failed to fetch machine network information')
+        }
+        
+        console.log(`✅ [Network Modal] Latest machine info loaded for: ${machine.id}`)
+        
+        // Fabric 목록 가져오기
+        const fabricsResponse = await axios.get('http://localhost:8081/api/fabrics', {
+          params: apiParams
+        })
+        
+        if (fabricsResponse.data && fabricsResponse.data.results) {
+          // Fabric 목록을 {id, name, vlan_id} 형태로 변환
+          availableFabrics.value = fabricsResponse.data.results.map(fabric => {
+            // vlans 배열에서 첫 번째 vlan의 id 추출
+            let vlanId = null
+            if (fabric.vlans && Array.isArray(fabric.vlans) && fabric.vlans.length > 0) {
+              vlanId = fabric.vlans[0].id
+              // 타입을 숫자로 통일 (문자열이면 숫자로 변환)
+              if (typeof vlanId === 'string') {
+                vlanId = parseInt(vlanId, 10)
+              }
+            }
+            
+            // fabric id -> vlan_id 매핑 저장 (fabric.id가 숫자/문자열 모두 가능하므로 두 가지 키로 저장)
+            if (vlanId !== null && !isNaN(vlanId)) {
+              // 원본 fabric.id를 그대로 키로 사용
+              fabricVlanMap.value[fabric.id] = vlanId
+              // 문자열/숫자 변환 버전도 저장 (타입 불일치 대비)
+              if (typeof fabric.id === 'number') {
+                fabricVlanMap.value[String(fabric.id)] = vlanId
+              } else if (typeof fabric.id === 'string') {
+                const numId = parseInt(fabric.id, 10)
+                if (!isNaN(numId)) {
+                  fabricVlanMap.value[numId] = vlanId
+                }
+              }
+            }
+            
+            return {
+              id: fabric.id,
+              name: fabric.name || `fabric-${fabric.id}`,
+              vlan_id: vlanId
+            }
+          })
+          console.log('Fabrics loaded:', availableFabrics.value.map(f => ({ id: f.id, id_type: typeof f.id, name: f.name, vlan_id: f.vlan_id, vlan_id_type: typeof f.vlan_id })))
+          console.log('Fabric VLAN map:', fabricVlanMap.value)
+        } else {
+          console.warn('No fabrics found in response')
+          availableFabrics.value = []
+        }
+        
+        // Subnet 목록 가져오기
+        const subnetsResponse = await axios.get('http://localhost:8081/api/subnets', {
+          params: apiParams
+        })
+        
+        if (subnetsResponse.data && subnetsResponse.data.results) {
+          availableSubnets.value = subnetsResponse.data.results.map(subnet => {
+            let vlanId = subnet.vlan?.id || subnet.vlan_id
+            // 타입을 숫자로 통일 (문자열이면 숫자로 변환)
+            if (vlanId !== null && vlanId !== undefined) {
+              if (typeof vlanId === 'string') {
+                vlanId = parseInt(vlanId, 10)
+              }
+            }
+            return {
+              id: subnet.id,
+              cidr: subnet.cidr,
+              vlan_id: vlanId
+            }
+          })
+          console.log('Subnets loaded:', availableSubnets.value.map(s => ({ id: s.id, cidr: s.cidr, vlan_id: s.vlan_id, vlan_id_type: typeof s.vlan_id })))
+        } else {
+          console.warn('No subnets found in response')
+          availableSubnets.value = []
+        }
+        
+        // 머신의 interface_set 정보 가져오기 (최신 정보 사용)
+        if (latestMachine.interface_set && Array.isArray(latestMachine.interface_set) && latestMachine.interface_set.length > 0) {
+          // interface_set 데이터를 Primary/Secondary 구조로 변환
+          networkInterfaces.value = latestMachine.interface_set.map(iface => {
+            console.log('=== Processing interface:', iface.name, '===')
+            console.log('Interface ID:', iface.id, 'type:', typeof iface.id)
+            console.log('Raw vlan object:', JSON.stringify(iface.vlan, null, 2))
+            
+            // Fabric ID 추출: interface.vlan.fabric_id에서 가져오기
+            let fabricId = null
+            if (iface.vlan && iface.vlan.fabric_id !== null && iface.vlan.fabric_id !== undefined) {
+              fabricId = iface.vlan.fabric_id
+              // 숫자로 변환 (문자열일 수도 있음)
+              if (typeof fabricId === 'string') {
+                const numId = parseInt(fabricId, 10)
+                if (!isNaN(numId)) {
+                  fabricId = numId
+                }
+              }
+              console.log(`Interface ${iface.name}: extracted fabricId=${fabricId} (${typeof fabricId}) from vlan.fabric_id`)
+            } else {
+              console.log(`Interface ${iface.name}: No fabric_id found in vlan`)
+            }
+            
+            console.log(`Available fabrics:`, availableFabrics.value.map(f => ({ id: f.id, id_type: typeof f.id, name: f.name })))
+            console.log(`Checking if fabricId exists in availableFabrics:`, fabricId !== null ? availableFabrics.value.some(f => 
+              f.id === fabricId || 
+              String(f.id) === String(fabricId) || 
+              Number(f.id) === Number(fabricId)
+            ) : false)
+            
+            // vlan_id 찾기: interface.vlan.id에서 직접 가져오기
+            let vlanId = null
+            if (iface.vlan && iface.vlan.id !== null && iface.vlan.id !== undefined) {
+              vlanId = iface.vlan.id
+              // 숫자로 변환
+              if (typeof vlanId === 'string') {
+                const numId = parseInt(vlanId, 10)
+                if (!isNaN(numId)) {
+                  vlanId = numId
+                }
+              }
+              console.log(`Interface ${iface.name}: vlan_id=${vlanId} (${typeof vlanId}) from vlan.id`)
+            } else if (fabricId !== null && fabricId !== undefined && fabricId !== '') {
+              // vlan.id가 없으면 fabricVlanMap에서 찾기
+              vlanId = fabricVlanMap.value[fabricId] || 
+                       fabricVlanMap.value[String(fabricId)] || 
+                       fabricVlanMap.value[Number(fabricId)]
+              console.log(`Interface ${iface.name}: vlan_id=${vlanId} from fabricVlanMap`)
+            }
+            
+            // vlan_id에 맞는 subnet 찾기 (Primary용)
+            let matchedSubnet = null
+            if (vlanId) {
+              let searchVlanId = vlanId
+              if (typeof searchVlanId === 'string') {
+                searchVlanId = parseInt(searchVlanId, 10)
+              }
+              matchedSubnet = availableSubnets.value.find(subnet => {
+                let subnetVlanId = subnet.vlan_id
+                if (subnetVlanId !== null && subnetVlanId !== undefined && typeof subnetVlanId === 'string') {
+                  subnetVlanId = parseInt(subnetVlanId, 10)
+                }
+                return subnetVlanId === searchVlanId
+              })
+            }
+            
+            console.log(`Interface ${iface.name}: matchedSubnet=`, matchedSubnet)
+            console.log(`Interface ${iface.name}: links=`, iface.links?.map(l => ({ 
+              ip: l.ip_address, 
+              subnet_id: l.subnet?.id, 
+              subnet_cidr: l.subnet?.cidr 
+            })))
+            
+            // Primary IP와 Secondary IPs 결정
+            let primaryIp = ''
+            let primaryLink = null
+            const secondaryIpAddresses = []
+            
+            if (iface.links && Array.isArray(iface.links) && iface.links.length > 0) {
+              // Primary IP: matchedSubnet의 id와 일치하는 link 찾기
+              if (matchedSubnet && matchedSubnet.id) {
+                const primaryLinkFound = iface.links.find(link => {
+                  // link.subnet이 객체인 경우 id 확인
+                  const linkSubnetId = link.subnet?.id || link.subnet
+                  const linkSubnetCidr = link.subnet?.cidr || link.cidr
+                  
+                  // 1. subnet ID로 매칭
+                  if (linkSubnetId) {
+                    const matchById = linkSubnetId === matchedSubnet.id || 
+                                     String(linkSubnetId) === String(matchedSubnet.id) ||
+                                     Number(linkSubnetId) === Number(matchedSubnet.id)
+                    if (matchById) {
+                      console.log(`Link subnet match by ID: linkSubnetId=${linkSubnetId}, matchedSubnet.id=${matchedSubnet.id}`)
+                      return true
+                    }
+                  }
+                  
+                  // 2. CIDR로 매칭 (subnet ID가 없거나 매칭되지 않은 경우)
+                  if (linkSubnetCidr && matchedSubnet.cidr) {
+                    const matchByCidr = linkSubnetCidr === matchedSubnet.cidr
+                    if (matchByCidr) {
+                      console.log(`Link subnet match by CIDR: linkSubnetCidr=${linkSubnetCidr}, matchedSubnet.cidr=${matchedSubnet.cidr}`)
+                      return true
+                    }
+                  }
+                  
+                  console.log(`Link subnet no match: linkSubnetId=${linkSubnetId} (${typeof linkSubnetId}), linkSubnetCidr=${linkSubnetCidr}, matchedSubnet.id=${matchedSubnet.id} (${typeof matchedSubnet.id}), matchedSubnet.cidr=${matchedSubnet.cidr}`)
+                  return false
+                })
+                
+                if (primaryLinkFound) {
+                  primaryLink = primaryLinkFound
+                  primaryIp = primaryLinkFound.ip_address || ''
+                  console.log(`Primary IP found for ${iface.name}: ${primaryIp}`)
+                  
+                  // 나머지 links를 Secondary로
+                  iface.links.forEach(link => {
+                    if (link !== primaryLinkFound) {
+                      const secIp = link.ip_address || ''
+                      const linkSubnetId = link.subnet?.id || link.subnet
+                      let secSubnet = null
+                      
+                      if (linkSubnetId) {
+                        secSubnet = availableSubnets.value.find(subnet => 
+                          subnet.id === linkSubnetId || 
+                          String(subnet.id) === String(linkSubnetId) ||
+                          Number(subnet.id) === Number(linkSubnetId)
+                        )
+                      }
+                      
+                      if (!secSubnet && link.subnet?.cidr) {
+                        secSubnet = availableSubnets.value.find(subnet => subnet.cidr === link.subnet.cidr)
+                      }
+                      
+                      secondaryIpAddresses.push({
+                        address: secIp,
+                        subnet: secSubnet,
+                        invalid: false
+                      })
+                    }
+                  })
+                } else {
+                  // Primary subnet과 매칭되는 link가 없으면 첫 번째 link를 Primary로
+                  console.log(`No matching link found for Primary subnet, using first link`)
+                  primaryLink = iface.links[0]
+                  primaryIp = iface.links[0]?.ip_address || ''
+                  // 나머지 links를 Secondary로
+                  for (let i = 1; i < iface.links.length; i++) {
+                    const link = iface.links[i]
+                    const secIp = link.ip_address || ''
+                    const linkSubnetId = link.subnet?.id || link.subnet
+                    let secSubnet = null
+                    
+                    if (linkSubnetId) {
+                      secSubnet = availableSubnets.value.find(subnet => 
+                        subnet.id === linkSubnetId || 
+                        String(subnet.id) === String(linkSubnetId) ||
+                        Number(subnet.id) === Number(linkSubnetId)
+                      )
+                    }
+                    
+                    if (!secSubnet && link.subnet?.cidr) {
+                      secSubnet = availableSubnets.value.find(subnet => subnet.cidr === link.subnet.cidr)
+                    }
+                    
+                    secondaryIpAddresses.push({
+                      address: secIp,
+                      subnet: secSubnet,
+                      invalid: false
+                    })
+                  }
+                }
+              } else {
+                // Fabric이 선택되지 않았거나 subnet이 없으면 첫 번째 link를 Primary로
+                console.log(`No matchedSubnet, using first link as Primary`)
+                primaryLink = iface.links[0]
+                primaryIp = iface.links[0]?.ip_address || ''
+                // 나머지 links를 Secondary로
+                for (let i = 1; i < iface.links.length; i++) {
+                  const link = iface.links[i]
+                  const secIp = link.ip_address || ''
+                  const linkSubnetId = link.subnet?.id || link.subnet
+                  let secSubnet = null
+                  
+                  if (linkSubnetId) {
+                    secSubnet = availableSubnets.value.find(subnet => 
+                      subnet.id === linkSubnetId || 
+                      String(subnet.id) === String(linkSubnetId) ||
+                      Number(subnet.id) === Number(linkSubnetId)
+                    )
+                  }
+                  
+                  if (!secSubnet && link.subnet?.cidr) {
+                    secSubnet = availableSubnets.value.find(subnet => subnet.cidr === link.subnet.cidr)
+                  }
+                  
+                  secondaryIpAddresses.push({
+                    address: secIp,
+                    subnet: secSubnet,
+                    invalid: false
+                  })
+                }
+              }
+            }
+            
+            // Primary IP 설정: 기존 IP만 표시 (fabric 선택 전까지는 prefix를 넣지 않음)
+            const primaryIpValue = primaryIp || ''
+            
+            console.log(`Interface ${iface.name}: Final - fabricId=${fabricId}, primaryIp=${primaryIpValue}, secondaryCount=${secondaryIpAddresses.length}`)
+            
+            return {
+              ...iface,
+              editableFabric: fabricId !== null && fabricId !== undefined && fabricId !== '' ? Number(fabricId) : null,
+              primaryIpAddress: primaryIpValue,
+              primaryIpInvalid: false,
+              matchedSubnet: matchedSubnet,
+              secondaryIpAddresses: secondaryIpAddresses
+            }
+          })
+          
+          console.log('Network interfaces loaded:', networkInterfaces.value)
+        } else {
+          networkInterfaces.value = []
+          networkError.value = 'No network interfaces found for this machine'
+        }
+        
+        loadingNetwork.value = false
+      } catch (err) {
+        console.error('Error loading network interfaces:', err)
+        networkError.value = err.response?.data?.error || err.message || 'Failed to load network interfaces'
+        loadingNetwork.value = false
+      }
+    }
+    
+    // Fabric 선택 시 해당 인터페이스의 subnet 업데이트
+    const updateFabricForInterface = (networkInterface) => {
+      const fabricId = networkInterface.editableFabric
+      // fabricId가 null, undefined, 빈 문자열인 경우만 체크 (0은 유효한 값)
+      if (fabricId === null || fabricId === undefined || fabricId === '') {
+        networkInterface.matchedSubnet = null
+        // Fabric 선택 해제 시 기존 IP 주소만 유지 (prefix 제거)
+        const currentIp = networkInterface.primaryIpAddress || ''
+        if (currentIp && currentIp.endsWith('.')) {
+          // prefix만 있는 경우 제거
+          networkInterface.primaryIpAddress = ''
+        }
+        return
+      }
+      
+      // Fabric의 vlan_id 찾기 (fabric.id가 숫자/문자열 모두 가능하므로 여러 방법으로 시도)
+      const fabric = availableFabrics.value.find(f => {
+        // fabric.id가 숫자/문자열 모두 가능하므로 두 가지 방법으로 비교
+        return f.id === fabricId || f.id == fabricId || String(f.id) === String(fabricId)
+      })
+      
+      console.log(`Fabric 선택: fabricId=${fabricId} (${typeof fabricId}), fabric=`, fabric)
+      console.log(`사용 가능한 fabrics:`, availableFabrics.value.map(f => ({ id: f.id, id_type: typeof f.id, name: f.name, vlan_id: f.vlan_id })))
+      
+      // vlanId 찾기: fabric에서 직접 찾거나 fabricVlanMap에서 찾기
+      let vlanId = null
+      if (fabric) {
+        vlanId = fabric.vlan_id
+      } else {
+        // fabricVlanMap에서 찾기 (fabricId가 숫자/문자열 모두 가능)
+        vlanId = fabricVlanMap.value[fabricId] || 
+                 fabricVlanMap.value[String(fabricId)] || 
+                 fabricVlanMap.value[Number(fabricId)]
+      }
+      
+      console.log(`Fabric VLAN map keys:`, Object.keys(fabricVlanMap.value))
+      console.log(`Fabric VLAN map:`, fabricVlanMap.value)
+      console.log(`찾은 vlanId=${vlanId} (${typeof vlanId})`)
+      
+      // vlan_id 타입 통일 (숫자로)
+      if (vlanId !== null && vlanId !== undefined) {
+        if (typeof vlanId === 'string') {
+          vlanId = parseInt(vlanId, 10)
+        }
+      }
+      
+      if (!vlanId || isNaN(vlanId)) {
+        console.warn(`Fabric ${fabricId}의 vlan_id를 찾을 수 없습니다. fabric=`, fabric)
+        console.warn(`fabricVlanMap에서 직접 확인:`, {
+          'fabricId': fabricVlanMap.value[fabricId],
+          'String(fabricId)': fabricVlanMap.value[String(fabricId)],
+          'Number(fabricId)': fabricVlanMap.value[Number(fabricId)]
+        })
+        networkInterface.matchedSubnet = null
+        networkInterface.primaryIpAddress = ''
+        return
+      }
+      
+      // vlan_id에 맞는 subnet 찾기 (타입 변환 후 비교)
+      console.log(`Subnet 찾기 시작: vlanId=${vlanId} (${typeof vlanId})`)
+      console.log(`사용 가능한 subnets 전체:`, availableSubnets.value.map(s => {
+        let svlanId = s.vlan_id
+        const originalType = typeof svlanId
+        if (svlanId !== null && svlanId !== undefined && typeof svlanId === 'string') {
+          svlanId = parseInt(svlanId, 10)
+        }
+        return { 
+          id: s.id, 
+          cidr: s.cidr, 
+          vlan_id: svlanId, 
+          vlan_id_original_type: originalType,
+          vlan_id_converted_type: typeof svlanId,
+          matches: svlanId === vlanId
+        }
+      }))
+      
+      const matchedSubnet = availableSubnets.value.find(subnet => {
+        let subnetVlanId = subnet.vlan_id
+        if (subnetVlanId !== null && subnetVlanId !== undefined) {
+          if (typeof subnetVlanId === 'string') {
+            subnetVlanId = parseInt(subnetVlanId, 10)
+          }
+        }
+        const matches = subnetVlanId === vlanId
+        if (matches) {
+          console.log(`매칭된 subnet 발견:`, { cidr: subnet.cidr, vlan_id: subnetVlanId, original_vlan_id: subnet.vlan_id })
+        }
+        return matches
+      })
+      
+      console.log(`Subnet 찾기 결과: vlanId=${vlanId} (${typeof vlanId}), matchedSubnet=`, matchedSubnet)
+      
+      networkInterface.matchedSubnet = matchedSubnet || null
+      
+      // 네트워크 프리픽스를 Primary IP에 설정
+      if (matchedSubnet && matchedSubnet.cidr) {
+        const networkPrefix = extractNetworkPrefix(matchedSubnet.cidr)
+        console.log(`네트워크 프리픽스 추출: cidr=${matchedSubnet.cidr}, prefix=${networkPrefix}`)
+        
+        // 기존 IP 주소가 없거나 네트워크 프리픽스로 시작하지 않으면 네트워크 프리픽스로 설정
+        if (!networkInterface.primaryIpAddress || !networkInterface.primaryIpAddress.startsWith(networkPrefix)) {
+          networkInterface.primaryIpAddress = networkPrefix
+        }
+      } else {
+        console.warn(`Subnet을 찾을 수 없거나 CIDR이 없습니다. fabricId=${fabricId}, vlanId=${vlanId}`)
+        networkInterface.primaryIpAddress = ''
+      }
+    }
+    
+    const closeNetworkModal = () => {
+      showNetworkModalState.value = false
+      selectedMachine.value = null
+      networkInterfaces.value = []
+      networkError.value = null
+      availableFabrics.value = []
+      availableSubnets.value = []
+      fabricVlanMap.value = {}
+    }
+    
+    const saveNetworkChanges = async () => {
+      savingNetwork.value = true
+      networkError.value = null
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const machineId = selectedMachine.value.id
+        
+        // 각 인터페이스에 대해 변경사항 저장
+        for (const networkInterface of networkInterfaces.value) {
+          const interfaceId = networkInterface.id
+          console.log(`[Save Network] Processing interface: name=${networkInterface.name}, id=${interfaceId}, id_type=${typeof interfaceId}`)
+          if (!interfaceId) {
+            console.warn('Interface ID가 없습니다:', networkInterface)
+            continue
+          }
+          
+          // 1. Fabric 변경 저장 (editableFabric이 변경되었으면)
+          if (networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '') {
+            console.log(`Saving fabric for interface ${interfaceId}: editableFabric=${networkInterface.editableFabric} (${typeof networkInterface.editableFabric})`)
+            // 타입 안전한 비교를 위해 여러 방법 시도
+            const fabric = availableFabrics.value.find(f => 
+              f.id === networkInterface.editableFabric || 
+              String(f.id) === String(networkInterface.editableFabric) ||
+              Number(f.id) === Number(networkInterface.editableFabric)
+            )
+            if (fabric && fabric.vlan_id) {
+              const vlanId = String(fabric.vlan_id)
+              // 인터페이스 ID를 문자열로 명시적으로 변환
+              const interfaceIdStr = String(interfaceId)
+              
+              console.log(`Updating VLAN for interface ${interfaceIdStr} (original: ${interfaceId}, type: ${typeof interfaceId}): vlanId=${vlanId}`)
+              
+              const vlanResponse = await axios.put(
+                `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/vlan`,
+                null,
+                {
+                  params: {
+                    maasUrl: apiParams.maasUrl,
+                    apiKey: apiParams.apiKey,
+                    vlanId: vlanId
+                  }
+                }
+              )
+              
+              if (!vlanResponse.data || !vlanResponse.data.success) {
+                throw new Error(`Failed to update VLAN for interface ${interfaceId}: ${vlanResponse.data?.error || 'Unknown error'}`)
+              }
+              
+              console.log(`VLAN updated successfully for interface ${interfaceId}`)
+            }
+          }
+          
+          // 2. Primary IP 저장
+          if (networkInterface.primaryIpAddress && networkInterface.primaryIpAddress.trim() && !networkInterface.primaryIpInvalid) {
+            const ipAddress = networkInterface.primaryIpAddress.trim()
+            const subnet = networkInterface.matchedSubnet
+            
+            if (!subnet || !subnet.id) {
+              throw new Error(`Primary IP를 저장하려면 Fabric을 선택하고 Subnet이 매칭되어야 합니다. (Interface: ${networkInterface.name || interfaceId})`)
+            }
+            
+            const subnetId = String(subnet.id)
+            
+            // 인터페이스 ID를 문자열로 명시적으로 변환
+            const interfaceIdStr = String(interfaceId)
+            console.log(`Linking Primary IP for interface ${interfaceIdStr} (original: ${interfaceId}, type: ${typeof interfaceId}): ip=${ipAddress}, subnetId=${subnetId}`)
+            
+            const linkResponse = await axios.post(
+              `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/link-subnet`,
+              null,
+              {
+                params: {
+                  maasUrl: apiParams.maasUrl,
+                  apiKey: apiParams.apiKey,
+                  ipAddress: ipAddress,
+                  subnetId: subnetId
+                }
+              }
+            )
+            
+            if (!linkResponse.data || !linkResponse.data.success) {
+              const errorMessage = linkResponse.data?.error || 'Unknown error'
+              console.error(`Failed to link Primary IP for interface ${interfaceIdStr}:`, errorMessage)
+              throw new Error(`Failed to link Primary IP for interface ${networkInterface.name || interfaceIdStr}: ${errorMessage}`)
+            }
+            
+            console.log(`Primary IP linked successfully for interface ${interfaceId}`)
+          }
+          
+          // 3. Secondary IPs 저장
+          if (networkInterface.secondaryIpAddresses && networkInterface.secondaryIpAddresses.length > 0) {
+            for (const secondaryIp of networkInterface.secondaryIpAddresses) {
+              if (secondaryIp.address && secondaryIp.address.trim() && !secondaryIp.invalid) {
+                const ipAddress = secondaryIp.address.trim()
+                const subnet = secondaryIp.subnet
+                
+                if (!subnet || !subnet.id) {
+                  console.warn(`Secondary IP ${ipAddress}를 저장하려면 Subnet이 필요합니다. 건너뜁니다.`)
+                  continue
+                }
+                
+                const subnetId = String(subnet.id)
+                
+                console.log(`Linking Secondary IP for interface ${interfaceId}: ip=${ipAddress}, subnetId=${subnetId}`)
+                
+                const linkResponse = await axios.post(
+                  `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceId}/link-subnet`,
+                  null,
+                  {
+                    params: {
+                      maasUrl: apiParams.maasUrl,
+                      apiKey: apiParams.apiKey,
+                      ipAddress: ipAddress,
+                      subnetId: subnetId
+                    }
+                  }
+                )
+                
+                if (!linkResponse.data || !linkResponse.data.success) {
+                  throw new Error(`Failed to link Secondary IP ${ipAddress} for interface ${interfaceId}: ${linkResponse.data?.error || 'Unknown error'}`)
+                }
+                
+                console.log(`Secondary IP linked successfully for interface ${interfaceId}`)
+              }
+            }
+          }
+        }
+        
+        console.log('All network changes saved successfully')
+        
+        // 저장 후 머신 목록 다시 로드
+        await loadMachines()
+        
+        // 모달 닫기
+        closeNetworkModal()
+        
+      } catch (err) {
+        console.error('Error saving network changes:', err)
+        networkError.value = err.response?.data?.error || err.message || 'Failed to save network changes'
+      } finally {
+        savingNetwork.value = false
+      }
+    }
+    
     // WebSocket 메시지 처리 (실시간 업데이트만)
     // ⚠️ 중요: 이 watch()는 useWebSocket()의 lastMessage를 감시함
     //           - useSettings() 등 다른 reactive 객체와 섞이지 않도록 주의
@@ -692,7 +1633,14 @@ export default {
     watch(lastMessage, (newMessage) => {
       if (!newMessage) return
       
-      console.log('🔔 [WebSocket] 메시지 수신 at', new Date().toLocaleTimeString(), ':', newMessage)
+      // 디버깅: abort 문제 파악을 위해 모든 메시지 로그
+      console.log('🔔 [WebSocket Debug] 메시지 수신 at', new Date().toLocaleTimeString(), ':', {
+        type: newMessage.type,
+        method: newMessage.method,
+        name: newMessage.name,
+        action: newMessage.action,
+        fullMessage: newMessage
+      })
       
       // 재연결 알림 처리
       if (newMessage.type === 'reconnect') {
@@ -708,54 +1656,85 @@ export default {
       
       // 모든 메시지 타입 로그 출력
       if (newMessage.type === 2) {
-        console.log('📋 Type 2 메시지 상세:', {
+        // console.log('📋 Type 2 메시지 상세:', {
+        //   name: newMessage.name,
+        //   action: newMessage.action,
+        //   hasData: !!newMessage.data,
+        //   dataKeys: newMessage.data ? Object.keys(newMessage.data) : []
+        // })
+        
+        // 머신이 아닌 다른 타입의 메시지도 로그 출력 (디버깅용)
+        if (newMessage.name !== 'machine' && newMessage.data) {
+          // console.log('⚠️ Non-machine message:', {
+          //   name: newMessage.name,
+          //   action: newMessage.action,
+          //   data: newMessage.data
+          // })
+        }
+      }
+      
+      // 실시간 업데이트만 처리 (type === 2)
+      // name이 'machine'인 경우만 처리
+      
+      // 디버깅: abort 후 메시지 확인을 위해 로그 활성화
+      if (newMessage.type === 2) {
+        console.log('🔍 [WebSocket Debug] Type 2 message received:', {
+          type: newMessage.type,
           name: newMessage.name,
           action: newMessage.action,
           hasData: !!newMessage.data,
           dataKeys: newMessage.data ? Object.keys(newMessage.data) : []
         })
         
-        // 머신이 아닌 다른 타입의 메시지도 로그 출력 (디버깅용)
-        if (newMessage.name !== 'machine' && newMessage.data) {
-          console.log('⚠️ Non-machine message:', {
-            name: newMessage.name,
-            action: newMessage.action,
-            data: newMessage.data
+        if (newMessage.data && newMessage.name === 'machine') {
+          console.log('🔍 [WebSocket Debug] Machine message details:', {
+            system_id: newMessage.data.system_id,
+            status: newMessage.data.status,
+            status_type: typeof newMessage.data.status,
+            action: newMessage.action
           })
         }
       }
       
-      // 실시간 업데이트만 처리 (type === 2)
-      // name이 'machine'인 경우만 처리
       if (newMessage.type === 2 && newMessage.data && newMessage.name === 'machine') {
-        console.log('🔍 Processing machine event:', newMessage.name, newMessage.action)
+        // console.log('🔍 Processing machine event:', newMessage.name, newMessage.action)
         const machineData = newMessage.data
-        console.log('🔔 Machine update:', newMessage.action, 'for', machineData.system_id)
+        // console.log('🔔 Machine update:', newMessage.action, 'for', machineData.system_id)
         
         if (newMessage.action === 'update') {
           const machineIndex = machines.value.findIndex(m => m.id === machineData.system_id)
-          console.log('🔍 Machine update details:', {
+          console.log('🔍 [WebSocket Debug] Machine update details:', {
             system_id: machineData.system_id,
             found_index: machineIndex,
             raw_status: machineData.status,
             status_type: typeof machineData.status,
-            status_message: machineData.status_message
+            status_message: machineData.status_message,
+            old_status: machineIndex !== -1 ? machines.value[machineIndex].status : 'N/A'
           })
           
           if (machineIndex !== -1) {
             const oldStatus = machines.value[machineIndex].status
             const newStatus = getStatusName(machineData.status)
             
+            console.log(`✅ [WebSocket Debug] Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
+            
+            // Ready 상태로 변경될 때 머신 정보를 다시 가져오기 (커미셔닝 후 네트워크 정보가 변경될 수 있음)
+            if (newStatus === 'ready' && oldStatus !== 'ready') {
+              console.log(`🔄 [WebSocket Debug] Status changed to Ready, refreshing machine details for: ${machineData.system_id}`)
+              refreshMachineDetails(machineData.system_id)
+            }
+            
             machines.value[machineIndex] = {
               ...machines.value[machineIndex],
               status: newStatus,
               status_message: machineData.status_message,
               power_state: machineData.power_state,
-              hostname: machineData.hostname
+              hostname: machineData.hostname,
+              interface_set: machineData.interface_set || machines.value[machineIndex].interface_set || []
             }
-            console.log(`✅ Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
+            // console.log(`✅ Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
           } else {
-            console.log(`❌ Machine not found in list: ${machineData.system_id}`)
+            console.log(`❌ [WebSocket Debug] Machine not found in list: ${machineData.system_id}`)
           }
         } else if (newMessage.action === 'create') {
           const newMachine = {
@@ -775,7 +1754,8 @@ export default {
             tags: machineData.tag_names || [],
             pool: machineData.pool?.name || 'default',
             zone: machineData.zone?.name || 'default',
-            fabric: machineData.fabric?.name || '-'
+            fabric: machineData.fabric?.name || '-',
+            interface_set: machineData.interface_set || []
           }
           machines.value.unshift(newMachine)
           console.log('✅ Machine created:', machineData.system_id)
@@ -824,6 +1804,23 @@ export default {
         canCommission,
         commissionMachine,
         abortCommissioning,
+        // Network Modal
+        showNetworkModalState,
+        selectedMachine,
+        networkInterfaces,
+        loadingNetwork,
+        networkError,
+        savingNetwork,
+        availableFabrics,
+        showNetworkModal,
+        closeNetworkModal,
+        saveNetworkChanges,
+        updateFabricForInterface,
+        validatePrimaryIpAddress,
+        validateSecondaryIpAddress,
+        addSecondaryIp,
+        removeSecondaryIp,
+        getDefaultIpExample,
         // WebSocket
         connectionStatus,
         lastMessage
@@ -1399,6 +2396,198 @@ export default {
 
 .btn-secondary:hover {
   background-color: #545b62;
+}
+
+/* Network Modal Styles */
+.network-modal-content {
+  max-width: 800px;
+  max-height: 90vh;
+}
+
+.network-modal-body {
+  padding: 1.5rem;
+  max-height: calc(90vh - 120px);
+  overflow-y: auto;
+}
+
+.network-interfaces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.network-interface-item {
+  border: 2px solid #dee2e6;
+  border-radius: 12px;
+  padding: 1.5rem;
+  background-color: #ffffff;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.network-interface-item:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-color: #007bff;
+}
+
+.interface-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.interface-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.interface-header h4 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.interface-id {
+  font-size: 0.75rem;
+  color: #6c757d;
+  font-weight: 400;
+}
+
+.interface-type {
+  padding: 0.25rem 0.75rem;
+  background-color: #e9ecef;
+  color: #495057;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.interface-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.current-value {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.ip-addresses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ip-address-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ip-subnet {
+  font-size: 0.75rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+}
+
+.no-ip {
+  width: 100%;
+}
+
+.no-interfaces {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+}
+
+.ip-address-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ip-address-secondary-item {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.secondary-ip-input-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.secondary-ip-input-group .form-input {
+  flex: 1;
+}
+
+.btn-remove-secondary {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background-color: #dc3545;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.25rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-remove-secondary:hover {
+  background-color: #c82333;
+  transform: scale(1.05);
+}
+
+.btn-add-secondary {
+  padding: 0.5rem 1rem;
+  border: 1px dashed #007bff;
+  background-color: transparent;
+  color: #007bff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.btn-add-secondary:hover {
+  background-color: #e7f3ff;
+  border-color: #0056b3;
+  color: #0056b3;
+}
+
+.form-input.ip-invalid {
+  border-color: #dc3545;
+}
+
+.form-input.ip-invalid:focus {
+  border-color: #dc3545;
+  box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.1);
+}
+
+.ip-validation-message {
+  display: block;
+  color: #dc3545;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
 }
 
 /* Responsive design */

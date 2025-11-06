@@ -66,6 +66,26 @@ public class MaasController {
     }
     
     /**
+     * 개별 머신 정보를 가져옵니다.
+     */
+    @GetMapping("/machines/{systemId}")
+    public Mono<ResponseEntity<Map<String, Object>>> getMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.getMachine(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to fetch machine")));
+    }
+    
+    /**
      * MAAS 서버 연결을 테스트합니다.
      */
     @GetMapping("/test-connection")
@@ -160,6 +180,89 @@ public class MaasController {
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to abort commissioning")));
+    }
+    
+    /**
+     * 모든 Fabric 목록을 가져옵니다.
+     */
+    @GetMapping("/fabrics")
+    public Mono<ResponseEntity<Map<String, Object>>> getAllFabrics(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.getAllFabrics(maasUrl, apiKey)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to fetch fabrics")));
+    }
+    
+    /**
+     * 모든 Subnet 목록을 가져옵니다.
+     */
+    @GetMapping("/subnets")
+    public Mono<ResponseEntity<Map<String, Object>>> getAllSubnets(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.getAllSubnets(maasUrl, apiKey)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to fetch subnets")));
+    }
+    
+    /**
+     * 인터페이스의 VLAN을 업데이트합니다.
+     */
+    @PutMapping("/machines/{systemId}/interfaces/{interfaceId}/vlan")
+    public Mono<ResponseEntity<Map<String, Object>>> updateInterfaceVlan(
+            @PathVariable String systemId,
+            @PathVariable String interfaceId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam String vlanId) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.updateInterfaceVlan(maasUrl, apiKey, systemId, interfaceId, vlanId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to update interface VLAN")));
+    }
+    
+    /**
+     * 인터페이스에 IP 주소를 링크합니다.
+     */
+    @PostMapping("/machines/{systemId}/interfaces/{interfaceId}/link-subnet")
+    public Mono<ResponseEntity<Map<String, Object>>> linkSubnetToInterface(
+            @PathVariable String systemId,
+            @PathVariable String interfaceId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam String ipAddress,
+            @RequestParam String subnetId) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.linkSubnetToInterface(maasUrl, apiKey, systemId, interfaceId, ipAddress, subnetId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to link subnet to interface")));
     }
     
     /**

@@ -2,7 +2,9 @@ import { reactive, computed } from 'vue'
 
 // 백엔드 application.properties와 일치하는 기본값
 const DEFAULT_MAAS_URL = 'http://192.168.189.71:5240'
-const DEFAULT_API_KEY = 'PHjPyRf0iCJyyrGZic:VCrnm5FoEa6dYhTFOV:nuBrXB3YBH5uztxKyhMYZYl1ulvUvrav'
+// 기존 API Key (나중에 다시 사용할 수 있으므로 주석처리)
+// const DEFAULT_API_KEY = 'PHjPyRf0iCJyyrGZic:VCrnm5FoEa6dYhTFOV:nuBrXB3YBH5uztxKyhMYZYl1ulvUvrav'
+const DEFAULT_API_KEY = 'iqchyWWGFyjJvyErIF:a5EW3SVQ7Hb8DWDBng:t6jsASkxavoohKMQHyopiwM9pMqJBoIT'
 
 // localStorage에서 설정 로드
 const loadSettings = () => {

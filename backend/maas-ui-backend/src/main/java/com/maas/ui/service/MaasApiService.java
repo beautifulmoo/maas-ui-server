@@ -3,6 +3,9 @@ package com.maas.ui.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import reactor.core.publisher.Mono;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -85,6 +88,43 @@ public class MaasApiService {
                 .onErrorResume(throwable -> {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * MAAS 서버에서 개별 머신 정보를 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return 머신 정보가 담긴 Map
+     */
+    public Mono<Map<String, Object>> getMachine(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> result = mapper.readValue(responseBody, Map.class);
+                        return result;
+                    } catch (Exception e) {
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("error", "Failed to parse response: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "Failed to fetch machine: " + e.getMessage());
                     return Mono.just(errorResult);
                 });
     }
@@ -292,6 +332,261 @@ public class MaasApiService {
     }
     
     /**
+     * MAAS 서버에서 모든 Fabric 목록을 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @return Fabric 목록이 담긴 Map
+     */
+    public Mono<Map<String, Object>> getAllFabrics(String maasUrl, String apiKey) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/fabrics/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("MAAS Fabric API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        
+                        // MAAS API는 직접 배열을 반환하거나 {"results": [...]} 형태로 반환할 수 있음
+                        if (jsonNode.isArray()) {
+                            // 직접 배열 형태인 경우
+                            System.out.println("Direct array response found: " + jsonNode.size() + " fabrics");
+                            result.put("results", jsonNode);
+                            result.put("count", jsonNode.size());
+                        } else if (jsonNode.has("results")) {
+                            // {"results": [...]} 형태인 경우
+                            JsonNode results = jsonNode.get("results");
+                            System.out.println("Results field found: " + results.size() + " fabrics");
+                            result.put("results", results);
+                            if (jsonNode.has("count")) {
+                                result.put("count", jsonNode.get("count").asInt());
+                            } else {
+                                result.put("count", results.size());
+                            }
+                        } else {
+                            System.out.println("Unexpected response format");
+                            result.put("results", objectMapper.createArrayNode());
+                            result.put("count", 0);
+                        }
+                        
+                        System.out.println("Final fabric result: " + result);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * MAAS 서버에서 모든 Subnet 목록을 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @return Subnet 목록이 담긴 Map
+     */
+    public Mono<Map<String, Object>> getAllSubnets(String maasUrl, String apiKey) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/subnets/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("MAAS Subnet API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        
+                        // MAAS API는 직접 배열을 반환하거나 {"results": [...]} 형태로 반환할 수 있음
+                        if (jsonNode.isArray()) {
+                            // 직접 배열 형태인 경우
+                            System.out.println("Direct array response found: " + jsonNode.size() + " subnets");
+                            result.put("results", jsonNode);
+                            result.put("count", jsonNode.size());
+                        } else if (jsonNode.has("results")) {
+                            // {"results": [...]} 형태인 경우
+                            JsonNode results = jsonNode.get("results");
+                            System.out.println("Results field found: " + results.size() + " subnets");
+                            result.put("results", results);
+                            if (jsonNode.has("count")) {
+                                result.put("count", jsonNode.get("count").asInt());
+                            } else {
+                                result.put("count", results.size());
+                            }
+                        } else {
+                            System.out.println("Unexpected response format");
+                            result.put("results", objectMapper.createArrayNode());
+                            result.put("count", 0);
+                        }
+                        
+                        System.out.println("Final subnet result: " + result);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * 인터페이스의 VLAN을 업데이트합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @param interfaceId 인터페이스 ID
+     * @param vlanId VLAN ID
+     * @return 업데이트 결과
+     */
+    public Mono<Map<String, Object>> updateInterfaceVlan(String maasUrl, String apiKey, 
+            String systemId, String interfaceId, String vlanId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/nodes/" + systemId + "/interfaces/" + interfaceId + "/";
+        
+        // Form-data로 전송
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("vlan", vlanId);
+        
+        return webClient.put()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Update Interface VLAN API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", true);
+                        result.put("data", jsonNode);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Update Interface VLAN JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * 인터페이스에 IP 주소를 링크합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @param interfaceId 인터페이스 ID
+     * @param ipAddress IP 주소
+     * @param subnetId Subnet ID
+     * @return 링크 결과
+     */
+    public Mono<Map<String, Object>> linkSubnetToInterface(String maasUrl, String apiKey,
+            String systemId, String interfaceId, String ipAddress, String subnetId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/nodes/" + systemId + "/interfaces/" + interfaceId + "/op-link_subnet";
+        
+        System.out.println("Link Subnet to Interface - URL: " + url);
+        System.out.println("Link Subnet to Interface - systemId: " + systemId + ", interfaceId: " + interfaceId + ", ipAddress: " + ipAddress + ", subnetId: " + subnetId);
+        
+        // Form-data로 전송
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("ip_address", ipAddress);
+        formData.add("subnet", subnetId);
+        formData.add("mode", "STATIC");
+        formData.add("default_gateway", "");
+        formData.add("force", "");
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Link Subnet API Error Response: " + errorBody);
+                                try {
+                                    // JSON 응답인 경우 파싱 시도
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    // JSON이 아닌 경우 원본 메시지 사용
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Link Subnet API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", true);
+                        result.put("data", jsonNode);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Link Subnet JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Link Subnet API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    // 에러 메시지 추출 (RuntimeException으로 래핑된 경우 메시지 사용)
+                    String errorMessage = throwable.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + throwable.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", errorMessage);
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
      * 머신 통계를 계산합니다.
      * 
      * @param machinesData 머신 데이터
@@ -312,9 +607,9 @@ public class MaasApiService {
                         if (machine.has("status")) {
                             int status = machine.get("status").asInt();
                             if (status == 4) { // Commissioned
-                                commissionedMachines++;
+                        commissionedMachines++;
                             } else if (status == 6) { // Deployed
-                                deployedMachines++;
+                        deployedMachines++;
                             }
                         }
                     }
