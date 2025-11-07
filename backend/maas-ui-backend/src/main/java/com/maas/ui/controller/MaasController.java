@@ -202,6 +202,26 @@ public class MaasController {
     }
     
     /**
+     * 특정 Fabric의 VLAN 목록을 가져옵니다.
+     */
+    @GetMapping("/fabrics/{fabricId}/vlans")
+    public Mono<ResponseEntity<Map<String, Object>>> getFabricVlans(
+            @PathVariable String fabricId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.getFabricVlans(maasUrl, apiKey, fabricId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to fetch fabric vlans")));
+    }
+    
+    /**
      * 모든 Subnet 목록을 가져옵니다.
      */
     @GetMapping("/subnets")
@@ -251,8 +271,10 @@ public class MaasController {
             @PathVariable String interfaceId,
             @RequestParam String maasUrl,
             @RequestParam String apiKey,
-            @RequestParam String ipAddress,
+            @RequestParam(required = false) String ipAddress,
             @RequestParam String subnetId) {
+        
+        System.out.println("Controller - linkSubnetToInterface called: systemId=" + systemId + ", interfaceId=" + interfaceId + ", ipAddress=" + (ipAddress != null ? ipAddress : "null") + ", subnetId=" + subnetId);
         
         if (!authService.isValidApiKey(apiKey)) {
             return Mono.just(ResponseEntity.badRequest()
@@ -263,6 +285,28 @@ public class MaasController {
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to link subnet to interface")));
+    }
+    
+    /**
+     * 인터페이스에서 IP 주소 링크를 삭제합니다.
+     */
+    @PostMapping("/machines/{systemId}/interfaces/{interfaceId}/unlink-subnet")
+    public Mono<ResponseEntity<Map<String, Object>>> unlinkSubnetFromInterface(
+            @PathVariable String systemId,
+            @PathVariable String interfaceId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam String linkId) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.unlinkSubnetFromInterface(maasUrl, apiKey, systemId, interfaceId, linkId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to unlink subnet from interface")));
     }
     
     /**

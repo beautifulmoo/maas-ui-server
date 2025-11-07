@@ -394,6 +394,70 @@ public class MaasApiService {
     }
     
     /**
+     * 특정 Fabric의 VLAN 목록을 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param fabricId Fabric ID
+     * @return VLAN 목록이 담긴 Map
+     */
+    public Mono<Map<String, Object>> getFabricVlans(String maasUrl, String apiKey, String fabricId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/fabrics/" + fabricId + "/vlans/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("MAAS Fabric VLANs API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        
+                        // MAAS API는 직접 배열을 반환하거나 {"results": [...]} 형태로 반환할 수 있음
+                        if (jsonNode.isArray()) {
+                            // 직접 배열 형태인 경우
+                            System.out.println("Direct array response found: " + jsonNode.size() + " vlans");
+                            result.put("results", jsonNode);
+                            result.put("count", jsonNode.size());
+                        } else if (jsonNode.has("results")) {
+                            // {"results": [...]} 형태인 경우
+                            JsonNode results = jsonNode.get("results");
+                            System.out.println("Results field found: " + results.size() + " vlans");
+                            result.put("results", results);
+                            if (jsonNode.has("count")) {
+                                result.put("count", jsonNode.get("count").asInt());
+                            } else {
+                                result.put("count", results.size());
+                            }
+                        } else {
+                            System.out.println("Unexpected response format");
+                            result.put("results", objectMapper.createArrayNode());
+                            result.put("count", 0);
+                        }
+                        
+                        System.out.println("Final fabric vlans result: " + result);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Fabric VLANs API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
      * MAAS 서버에서 모든 Subnet 목록을 가져옵니다.
      * 
      * @param maasUrl MAAS 서버 URL
@@ -513,23 +577,46 @@ public class MaasApiService {
      * @param apiKey MAAS API 키
      * @param systemId 머신의 시스템 ID
      * @param interfaceId 인터페이스 ID
-     * @param ipAddress IP 주소
+     * @param ipAddress IP 주소 (null이면 AUTO mode로 설정)
      * @param subnetId Subnet ID
      * @return 링크 결과
      */
     public Mono<Map<String, Object>> linkSubnetToInterface(String maasUrl, String apiKey,
             String systemId, String interfaceId, String ipAddress, String subnetId) {
+        // ipAddress가 null이거나 비어있으면 AUTO mode, 아니면 STATIC mode
+        String mode = (ipAddress == null || ipAddress.isEmpty() || ipAddress.trim().isEmpty()) ? "AUTO" : "STATIC";
+        System.out.println("Link Subnet - ipAddress: " + (ipAddress != null ? ipAddress : "null") + ", mode: " + mode);
+        return linkSubnetToInterface(maasUrl, apiKey, systemId, interfaceId, ipAddress, subnetId, mode);
+    }
+    
+    /**
+     * 인터페이스에 IP 주소를 링크합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @param interfaceId 인터페이스 ID
+     * @param ipAddress IP 주소 (null이면 포함하지 않음)
+     * @param subnetId Subnet ID
+     * @param mode 링크 모드 (STATIC 또는 AUTO)
+     * @return 링크 결과
+     */
+    public Mono<Map<String, Object>> linkSubnetToInterface(String maasUrl, String apiKey,
+            String systemId, String interfaceId, String ipAddress, String subnetId, String mode) {
         String authHeader = authService.generateAuthHeader(apiKey);
         String url = maasUrl + "/MAAS/api/2.0/nodes/" + systemId + "/interfaces/" + interfaceId + "/op-link_subnet";
         
         System.out.println("Link Subnet to Interface - URL: " + url);
-        System.out.println("Link Subnet to Interface - systemId: " + systemId + ", interfaceId: " + interfaceId + ", ipAddress: " + ipAddress + ", subnetId: " + subnetId);
+        System.out.println("Link Subnet to Interface - systemId: " + systemId + ", interfaceId: " + interfaceId + ", ipAddress: " + (ipAddress != null ? ipAddress : "null") + ", subnetId: " + subnetId + ", mode: " + mode);
         
         // Form-data로 전송
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
-        formData.add("ip_address", ipAddress);
+        // ipAddress가 null이거나 비어있으면 포함하지 않음
+        if (ipAddress != null && !ipAddress.trim().isEmpty()) {
+            formData.add("ip_address", ipAddress);
+        }
         formData.add("subnet", subnetId);
-        formData.add("mode", "STATIC");
+        formData.add("mode", mode);
         formData.add("default_gateway", "");
         formData.add("force", "");
         
@@ -574,6 +661,81 @@ public class MaasApiService {
                 })
                 .onErrorResume(throwable -> {
                     System.out.println("Link Subnet API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    // 에러 메시지 추출 (RuntimeException으로 래핑된 경우 메시지 사용)
+                    String errorMessage = throwable.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + throwable.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", errorMessage);
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * 인터페이스에서 IP 주소 링크를 삭제합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @param interfaceId 인터페이스 ID
+     * @param linkId 링크 ID
+     * @return 언링크 결과
+     */
+    public Mono<Map<String, Object>> unlinkSubnetFromInterface(String maasUrl, String apiKey,
+            String systemId, String interfaceId, String linkId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/nodes/" + systemId + "/interfaces/" + interfaceId + "/op-unlink_subnet";
+        
+        System.out.println("Unlink Subnet from Interface - URL: " + url);
+        System.out.println("Unlink Subnet from Interface - systemId: " + systemId + ", interfaceId: " + interfaceId + ", linkId: " + linkId);
+        
+        // Form-data로 전송
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("id", linkId);
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Unlink Subnet API Error Response: " + errorBody);
+                                try {
+                                    // JSON 응답인 경우 파싱 시도
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    // JSON이 아닌 경우 원본 메시지 사용
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Unlink Subnet API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", true);
+                        result.put("data", jsonNode);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Unlink Subnet JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Unlink Subnet API Error: " + throwable.getMessage());
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("success", false);
                     // 에러 메시지 추출 (RuntimeException으로 래핑된 경우 메시지 사용)
