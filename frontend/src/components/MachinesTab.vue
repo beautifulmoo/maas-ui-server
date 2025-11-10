@@ -260,6 +260,19 @@
                 </div>
                 
                 <div class="form-group">
+                  <label>IP Assignment</label>
+                  <select 
+                    v-model="networkInterface.ipAssignment"
+                    class="form-select"
+                    @change="handleIpAssignmentChange(networkInterface)"
+                  >
+                    <option value="unconfigured">Unconfigured</option>
+                    <option value="automatic">Automatic</option>
+                    <option value="static">Static</option>
+                  </select>
+                </div>
+                
+                <div class="form-group" v-if="networkInterface.ipAssignment === 'static'">
                   <label>IP Address (Primary)</label>
                   <div class="ip-address-primary">
                     <input 
@@ -270,6 +283,7 @@
                       :class="{ 'ip-invalid': networkInterface.primaryIpInvalid }"
                       @input="validatePrimaryIpAddress(networkInterface)"
                       @blur="validatePrimaryIpAddress(networkInterface)"
+                      @focus="handlePrimaryIpFocus(networkInterface)"
                     >
                     <span class="ip-validation-message" v-if="networkInterface.primaryIpInvalid">
                       유효하지 않은 IP 주소입니다
@@ -1016,6 +1030,79 @@ export default {
       networkInterface.primaryIpInvalid = !isValidIpAddress(ipAddress)
     }
     
+    // Primary IP 입력 필드 focus 시 prefix 자동 채우기
+    const handlePrimaryIpFocus = (networkInterface) => {
+      if (!networkInterface) return
+      
+      // matchedSubnet이 있고 IP 주소가 비어있거나 prefix로 시작하지 않으면 prefix 설정
+      if (networkInterface.matchedSubnet && networkInterface.matchedSubnet.cidr) {
+        const networkPrefix = extractNetworkPrefix(networkInterface.matchedSubnet.cidr)
+        
+        if (networkPrefix) {
+          const currentIp = networkInterface.primaryIpAddress || ''
+          
+          // IP 주소가 비어있거나 prefix로 시작하지 않으면 prefix로 설정
+          if (!currentIp || !currentIp.startsWith(networkPrefix)) {
+            networkInterface.primaryIpAddress = networkPrefix
+          }
+        }
+      }
+    }
+    
+    // IP Assignment 변경 시 처리
+    const handleIpAssignmentChange = (networkInterface) => {
+      if (!networkInterface) return
+      
+      if (networkInterface.ipAssignment === 'static') {
+        // Static 선택 시: IP Address 필드 표시 및 prefix 설정
+        if (networkInterface.matchedSubnet && networkInterface.matchedSubnet.cidr) {
+          const networkPrefix = extractNetworkPrefix(networkInterface.matchedSubnet.cidr)
+          if (networkPrefix && (!networkInterface.primaryIpAddress || !networkInterface.primaryIpAddress.startsWith(networkPrefix))) {
+            networkInterface.primaryIpAddress = networkPrefix
+          }
+        }
+      } else if (networkInterface.ipAssignment === 'automatic') {
+        // Automatic 선택 시: IP Address 필드 숨김 및 IP 주소 초기화
+        networkInterface.primaryIpAddress = ''
+        
+        // Automatic일 때는 fabric에 맞는 subnet이 필요하므로, Fabric이 선택되어 있으면 subnet 자동 매칭
+        if (networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '') {
+          const fabric = availableFabrics.value.find(f => 
+            f.id === networkInterface.editableFabric || 
+            String(f.id) === String(networkInterface.editableFabric) ||
+            Number(f.id) === Number(networkInterface.editableFabric)
+          )
+          
+          if (fabric && fabric.vlan_id) {
+            const vlanId = fabric.vlan_id
+            let searchVlanId = vlanId
+            if (typeof searchVlanId === 'string') {
+              searchVlanId = parseInt(searchVlanId, 10)
+            }
+            
+            // 해당 vlan_id에 맞는 subnet 찾기
+            const matchedSubnet = availableSubnets.value.find(subnet => {
+              let subnetVlanId = subnet.vlan_id
+              if (subnetVlanId !== null && subnetVlanId !== undefined && typeof subnetVlanId === 'string') {
+                subnetVlanId = parseInt(subnetVlanId, 10)
+              }
+              return subnetVlanId === searchVlanId
+            })
+            
+            if (matchedSubnet) {
+              console.log(`[IP Assignment] Automatic selected, matched subnet: ${matchedSubnet.id} (${matchedSubnet.cidr})`)
+              networkInterface.matchedSubnet = matchedSubnet
+            } else {
+              console.warn(`[IP Assignment] Automatic selected but no subnet found for vlan_id=${vlanId}`)
+            }
+          }
+        }
+      } else if (networkInterface.ipAssignment === 'unconfigured') {
+        // Unconfigured 선택 시: IP Address 필드 숨김 및 IP 주소 초기화
+        networkInterface.primaryIpAddress = ''
+      }
+    }
+    
     // Secondary IP 주소 유효성 검사
     const validateSecondaryIpAddress = (networkInterface, secIndex) => {
       if (!networkInterface || !networkInterface.secondaryIpAddresses) {
@@ -1510,7 +1597,20 @@ export default {
             // Primary link의 ID 저장 (IP 변경 시 기존 link 삭제용)
             const originalPrimaryLinkId = primaryLink?.id ? String(primaryLink.id) : null
             
-            console.log(`Interface ${iface.name}: Final - fabricId=${fabricId}, primaryIp=${primaryIpValue}, secondaryCount=${secondaryIpAddresses.length}, originalPrimaryLinkId=${originalPrimaryLinkId || 'N/A'}`)
+            // IP Assignment 상태 결정
+            // - Primary link가 있고 IP 주소가 있으면 'static'
+            // - Primary link가 있지만 IP 주소가 없으면 'automatic'
+            // - Primary link가 없으면 'unconfigured'
+            let ipAssignment = 'unconfigured'
+            if (primaryLink) {
+              if (primaryIpValue && primaryIpValue.trim() !== '') {
+                ipAssignment = 'static'
+              } else {
+                ipAssignment = 'automatic'
+              }
+            }
+            
+            console.log(`Interface ${iface.name}: Final - fabricId=${fabricId}, primaryIp=${primaryIpValue}, secondaryCount=${secondaryIpAddresses.length}, originalPrimaryLinkId=${originalPrimaryLinkId || 'N/A'}, ipAssignment=${ipAssignment}`)
             
             // Secondary IP에 subnet이 있으면 prefix 설정
             secondaryIpAddresses.forEach(secIp => {
@@ -1534,6 +1634,8 @@ export default {
             return {
               ...iface,
               editableFabric: fabricId !== null && fabricId !== undefined && fabricId !== '' ? Number(fabricId) : null,
+              ipAssignment: ipAssignment, // IP Assignment 상태
+              originalIpAssignment: ipAssignment, // 원본 IP Assignment 저장 (변경 감지용)
               primaryIpAddress: primaryIpValue,
               originalPrimaryIpAddress: primaryIpValue, // 원본 Primary IP 저장 (변경 감지용)
               originalPrimaryLinkId: originalPrimaryLinkId, // 원본 Primary link ID 저장 (IP 변경 시 기존 link 삭제용)
@@ -1687,6 +1789,8 @@ export default {
         
         // 각 인터페이스에 대해 변경사항 저장
         console.log(`[Save Network] Starting save for ${networkInterfaces.value.length} interfaces`)
+        const saveErrors = [] // 각 인터페이스별 에러 수집
+        
         for (const networkInterface of networkInterfaces.value) {
           const interfaceId = networkInterface.id
           const interfaceName = networkInterface.name || interfaceId
@@ -1702,131 +1806,298 @@ export default {
           // 인터페이스 ID를 문자열로 명시적으로 변환 (모든 블록에서 사용)
           const interfaceIdStr = String(interfaceId)
           
-          // 1. Fabric 변경 저장 (editableFabric이 변경되었으면)
-          if (networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '') {
-            console.log(`Saving fabric for interface ${interfaceId}: editableFabric=${networkInterface.editableFabric} (${typeof networkInterface.editableFabric})`)
-            // 타입 안전한 비교를 위해 여러 방법 시도
-            const fabric = availableFabrics.value.find(f => 
-              f.id === networkInterface.editableFabric || 
-              String(f.id) === String(networkInterface.editableFabric) ||
-              Number(f.id) === Number(networkInterface.editableFabric)
-            )
-            if (fabric && fabric.vlan_id) {
-              const vlanId = String(fabric.vlan_id)
-              
-              console.log(`Updating VLAN for interface ${interfaceIdStr} (original: ${interfaceId}, type: ${typeof interfaceId}): vlanId=${vlanId}`)
-              
-              const vlanResponse = await axios.put(
-                `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/vlan`,
-                null,
-                {
-                  params: {
-                    maasUrl: apiParams.maasUrl,
-                    apiKey: apiParams.apiKey,
-                    vlanId: vlanId
-                  }
-                }
+          // 각 인터페이스를 독립적으로 처리 (에러가 발생해도 다음 인터페이스 계속 처리)
+          try {
+            // 1. Fabric 변경 저장 (editableFabric이 변경되었으면)
+            let fabricChanged = false
+            if (networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '') {
+              console.log(`Saving fabric for interface ${interfaceId}: editableFabric=${networkInterface.editableFabric} (${typeof networkInterface.editableFabric})`)
+              // 타입 안전한 비교를 위해 여러 방법 시도
+              const fabric = availableFabrics.value.find(f => 
+                f.id === networkInterface.editableFabric || 
+                String(f.id) === String(networkInterface.editableFabric) ||
+                Number(f.id) === Number(networkInterface.editableFabric)
               )
-              
-              if (!vlanResponse.data || !vlanResponse.data.success) {
-                throw new Error(`Failed to update VLAN for interface ${interfaceId}: ${vlanResponse.data?.error || 'Unknown error'}`)
-              }
-              
-              console.log(`VLAN updated successfully for interface ${interfaceId}`)
-            }
-          }
-          
-          // 2. Primary IP 저장 (변경된 경우에만)
-          // currentPrimaryIp와 originalPrimaryIp는 위에서 이미 선언됨
-          if (currentPrimaryIp && !networkInterface.primaryIpInvalid && primaryIpChanged) {
-            const ipAddress = currentPrimaryIp
-            const subnet = networkInterface.matchedSubnet
-            
-            if (!subnet || !subnet.id) {
-              throw new Error(`Primary IP를 저장하려면 Fabric을 선택하고 Subnet이 매칭되어야 합니다. (Interface: ${networkInterface.name || interfaceId})`)
-            }
-            
-            const subnetId = String(subnet.id)
-            const originalPrimaryLinkId = networkInterface.originalPrimaryLinkId
-            
-            console.log(`[Save Network] Updating Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}): ip=${ipAddress} (changed from ${originalPrimaryIp || 'empty'}), subnetId=${subnetId}, originalLinkId=${originalPrimaryLinkId || 'N/A'}`)
-            
-            try {
-              // 기존 Primary link가 있으면 먼저 삭제
-              if (originalPrimaryLinkId) {
-                console.log(`[Save Network] Unlinking existing Primary link (id: ${originalPrimaryLinkId}) for interface ${interfaceName}`)
+              if (fabric && fabric.vlan_id) {
+                const vlanId = String(fabric.vlan_id)
                 
-                const unlinkResponse = await axios.post(
-                  `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                console.log(`Updating VLAN for interface ${interfaceIdStr} (original: ${interfaceId}, type: ${typeof interfaceId}): vlanId=${vlanId}`)
+                
+                const vlanResponse = await axios.put(
+                  `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/vlan`,
                   null,
                   {
                     params: {
                       maasUrl: apiParams.maasUrl,
                       apiKey: apiParams.apiKey,
-                      linkId: originalPrimaryLinkId
+                      vlanId: vlanId
                     }
                   }
                 )
                 
-                if (!unlinkResponse.data || !unlinkResponse.data.success) {
-                  const errorMessage = unlinkResponse.data?.error || 'Unknown error'
-                  console.error(`[Save Network] Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
-                  throw new Error(`Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                if (!vlanResponse.data || !vlanResponse.data.success) {
+                  throw new Error(`Failed to update VLAN for interface ${interfaceName}: ${vlanResponse.data?.error || 'Unknown error'}`)
                 }
                 
-                console.log(`[Save Network] Primary link unlinked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
-              }
-              
-              // 새로운 Primary link 생성
-              console.log(`[Save Network] Linking new Primary IP for interface ${interfaceName} (id: ${interfaceIdStr})`)
-              
-              const linkResponse = await axios.post(
-                `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/link-subnet`,
-                null,
-                {
-                  params: {
-                    maasUrl: apiParams.maasUrl,
-                    apiKey: apiParams.apiKey,
-                    ipAddress: ipAddress,
-                    subnetId: subnetId
-                  }
-                }
-              )
-              
-              if (!linkResponse.data || !linkResponse.data.success) {
-                const errorMessage = linkResponse.data?.error || 'Unknown error'
-                console.error(`[Save Network] Failed to link Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
-                throw new Error(`Failed to link Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
-              }
-              
-              console.log(`[Save Network] Primary IP linked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
-            } catch (err) {
-              // axios 에러인 경우 응답 데이터에서 에러 메시지 추출
-              if (err.response && err.response.data && err.response.data.error) {
-                const errorMessage = err.response.data.error
-                console.error(`[Save Network] Failed to update Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
-                throw new Error(`Failed to update Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
-              }
-              // 그 외의 경우 원본 에러 재던지기
-              throw err
-            }
-          }
-          
-          // 3. Secondary IPs 처리
-          const originalSecondaryIps = networkInterface.originalSecondaryIpAddresses || []
-          const currentSecondaryIps = networkInterface.secondaryIpAddresses || []
-          
-          // 3-1. 삭제된 Secondary IP 처리 (originalLinkId가 있지만 현재 배열에 없는 것)
-          for (const originalSecIp of originalSecondaryIps) {
-            if (originalSecIp.originalLinkId) {
-              // 현재 배열에 같은 originalLinkId가 있는지 확인
-              const stillExists = currentSecondaryIps.some(secIp => secIp.originalLinkId === originalSecIp.originalLinkId)
-              
-              if (!stillExists) {
-                // 삭제된 Secondary IP - unlink 호출
-                console.log(`[Save Network] Unlinking deleted Secondary link (id: ${originalSecIp.originalLinkId}) for interface ${interfaceName}`)
+                console.log(`VLAN updated successfully for interface ${interfaceId}`)
+                fabricChanged = true
                 
+                // Fabric 변경 후 최신 머신 정보를 가져와서 올바른 link ID와 subnet 업데이트
+                console.log(`[Save Network] Fabric changed, fetching latest machine info to update link IDs and subnet...`)
                 try {
+                  // 먼저 선택한 fabric에 맞는 subnet 찾기
+                  const selectedFabric = availableFabrics.value.find(f => 
+                    f.id === networkInterface.editableFabric || 
+                    String(f.id) === String(networkInterface.editableFabric) ||
+                    Number(f.id) === Number(networkInterface.editableFabric)
+                  )
+                  
+                  if (selectedFabric && selectedFabric.vlan_id) {
+                    const vlanId = selectedFabric.vlan_id
+                    let searchVlanId = vlanId
+                    if (typeof searchVlanId === 'string') {
+                      searchVlanId = parseInt(searchVlanId, 10)
+                    }
+                    
+                    // 해당 vlan_id에 맞는 subnet 찾기
+                    const matchedSubnet = availableSubnets.value.find(subnet => {
+                      let subnetVlanId = subnet.vlan_id
+                      if (subnetVlanId !== null && subnetVlanId !== undefined && typeof subnetVlanId === 'string') {
+                        subnetVlanId = parseInt(subnetVlanId, 10)
+                      }
+                      return subnetVlanId === searchVlanId
+                    })
+                    
+                    if (matchedSubnet) {
+                      console.log(`[Save Network] Updated matchedSubnet for interface ${interfaceName}: ${networkInterface.matchedSubnet?.id || 'N/A'} → ${matchedSubnet.id} (${matchedSubnet.cidr})`)
+                      networkInterface.matchedSubnet = matchedSubnet
+                      // subnet이 업데이트되었으므로 확인
+                      console.log(`[Save Network] After update, networkInterface.matchedSubnet=`, networkInterface.matchedSubnet)
+                    } else {
+                      console.warn(`[Save Network] No subnet found for vlan_id=${vlanId} for interface ${interfaceName}`)
+                      console.warn(`[Save Network] Available subnets:`, availableSubnets.value.map(s => ({ id: s.id, cidr: s.cidr, vlan_id: s.vlan_id })))
+                    }
+                  }
+                  
+                  // 최신 머신 정보 가져오기
+                  const machineResponse = await axios.get(`http://localhost:8081/api/machines/${machineId}`, {
+                    params: apiParams
+                  })
+                  
+                  if (machineResponse.data && !machineResponse.data.error) {
+                    const latestMachine = machineResponse.data
+                    const latestInterface = latestMachine.interface_set?.find(iface => 
+                      String(iface.id) === interfaceIdStr || iface.name === interfaceName
+                    )
+                    
+                    if (latestInterface && latestInterface.links && latestInterface.links.length > 0) {
+                      // Primary link 찾기 (업데이트된 matchedSubnet과 일치하는 link 또는 첫 번째 link)
+                      const matchedSubnet = networkInterface.matchedSubnet
+                      let primaryLink = null
+                      
+                      if (matchedSubnet && matchedSubnet.id) {
+                        primaryLink = latestInterface.links.find(link => {
+                          const linkSubnetId = link.subnet?.id || link.subnet
+                          return String(linkSubnetId) === String(matchedSubnet.id)
+                        })
+                      }
+                      
+                      if (!primaryLink && latestInterface.links.length > 0) {
+                        primaryLink = latestInterface.links[0]
+                      }
+                      
+                      if (primaryLink && primaryLink.id) {
+                        const latestPrimaryLinkId = String(primaryLink.id)
+                        console.log(`[Save Network] Updated Primary link ID for interface ${interfaceName}: ${networkInterface.originalPrimaryLinkId || 'N/A'} → ${latestPrimaryLinkId}`)
+                        networkInterface.originalPrimaryLinkId = latestPrimaryLinkId
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.warn(`[Save Network] Failed to fetch latest machine info after fabric change:`, err)
+                  // 에러가 발생해도 계속 진행 (기존 link ID 사용)
+                }
+              }
+            }
+          
+            // 2. Primary IP 저장 (IP Assignment에 따라 처리)
+            const subnet = networkInterface.matchedSubnet
+            const ipAssignment = networkInterface.ipAssignment || 'unconfigured'
+            const originalIpAssignment = networkInterface.originalIpAssignment || 'unconfigured'
+            const ipAssignmentChanged = ipAssignment !== originalIpAssignment
+            
+            console.log(`[Save Network] Checking Primary IP save for interface ${interfaceName}: ipAssignment=${ipAssignment}, originalIpAssignment=${originalIpAssignment}, changed=${ipAssignmentChanged}, subnet=`, subnet)
+            
+            // IP Assignment가 변경되었거나, Static/Automatic이고 IP가 변경된 경우 처리
+            // Automatic일 때도 처리해야 함 (Fabric 변경 시 subnet 매칭 필요)
+            if (ipAssignmentChanged || (ipAssignment === 'static' && primaryIpChanged) || (ipAssignment === 'automatic' && ipAssignmentChanged)) {
+              const subnetId = subnet ? String(subnet.id) : null
+              const originalPrimaryLinkId = networkInterface.originalPrimaryLinkId
+              
+              if (ipAssignment === 'unconfigured') {
+                // Unconfigured: 기존 link 삭제
+                if (originalPrimaryLinkId) {
+                  console.log(`[Save Network] Unlinking Primary link for Unconfigured interface ${interfaceName} (id: ${interfaceIdStr})`)
+                  
+                  const unlinkResponse = await axios.post(
+                    `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                    null,
+                    {
+                      params: {
+                        maasUrl: apiParams.maasUrl,
+                        apiKey: apiParams.apiKey,
+                        linkId: originalPrimaryLinkId
+                      }
+                    }
+                  )
+                  
+                  if (!unlinkResponse.data || !unlinkResponse.data.success) {
+                    const errorMessage = unlinkResponse.data?.error || 'Unknown error'
+                    console.error(`[Save Network] Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
+                    throw new Error(`Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                  }
+                  
+                  console.log(`[Save Network] Primary link unlinked successfully for Unconfigured interface ${interfaceName} (id: ${interfaceIdStr})`)
+                }
+              } else if (ipAssignment === 'automatic') {
+                // Automatic: AUTO mode로 link 생성
+                if (!subnet || !subnet.id) {
+                  throw new Error(`Automatic IP Assignment을 저장하려면 Fabric을 선택하고 Subnet이 매칭되어야 합니다. (Interface: ${networkInterface.name || interfaceId})`)
+                }
+                
+                console.log(`[Save Network] Creating Primary link with AUTO mode for interface ${interfaceName} (id: ${interfaceIdStr}): subnetId=${subnetId}`)
+                
+                // 기존 Primary link가 있으면 먼저 삭제
+                if (originalPrimaryLinkId) {
+                  console.log(`[Save Network] Unlinking existing Primary link (id: ${originalPrimaryLinkId}) for interface ${interfaceName}`)
+                  
+                  const unlinkResponse = await axios.post(
+                    `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                    null,
+                    {
+                      params: {
+                        maasUrl: apiParams.maasUrl,
+                        apiKey: apiParams.apiKey,
+                        linkId: originalPrimaryLinkId
+                      }
+                    }
+                  )
+                  
+                  if (!unlinkResponse.data || !unlinkResponse.data.success) {
+                    const errorMessage = unlinkResponse.data?.error || 'Unknown error'
+                    console.error(`[Save Network] Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
+                    throw new Error(`Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                  }
+                  
+                  console.log(`[Save Network] Primary link unlinked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
+                }
+                
+                // 새로운 Primary link 생성 (AUTO mode - ipAddress 없이)
+                const linkResponse = await axios.post(
+                  `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/link-subnet`,
+                  null,
+                  {
+                    params: {
+                      maasUrl: apiParams.maasUrl,
+                      apiKey: apiParams.apiKey,
+                      subnetId: subnetId
+                      // ipAddress를 포함하지 않으면 백엔드에서 AUTO mode로 처리
+                    }
+                  }
+                )
+                
+                if (!linkResponse.data || !linkResponse.data.success) {
+                  const errorMessage = linkResponse.data?.error || 'Unknown error'
+                  console.error(`[Save Network] Failed to link Primary link with AUTO mode for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
+                  throw new Error(`Failed to link Primary link with AUTO mode for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                }
+                
+                console.log(`[Save Network] Primary link with AUTO mode linked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
+              } else if (ipAssignment === 'static') {
+                // Static: STATIC mode로 link 생성 (IP 주소 필요)
+                if (!subnet || !subnet.id) {
+                  throw new Error(`Static IP Assignment을 저장하려면 Fabric을 선택하고 Subnet이 매칭되어야 합니다. (Interface: ${networkInterface.name || interfaceId})`)
+                }
+                
+                // 유효한 IP 주소 확인
+                const hasValidIp = currentPrimaryIp && 
+                                   currentPrimaryIp.trim() !== '' && 
+                                   !currentPrimaryIp.endsWith('.') && 
+                                   !networkInterface.primaryIpInvalid &&
+                                   isValidIpAddress(currentPrimaryIp)
+                
+                if (!hasValidIp) {
+                  throw new Error(`Static IP Assignment을 저장하려면 유효한 IP 주소를 입력해야 합니다. (Interface: ${networkInterface.name || interfaceId})`)
+                }
+                
+                const ipAddress = currentPrimaryIp
+                console.log(`[Save Network] Updating Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}): ip=${ipAddress} (changed from ${originalPrimaryIp || 'empty'}), subnetId=${subnetId}, originalLinkId=${originalPrimaryLinkId || 'N/A'}`)
+                
+                // 기존 Primary link가 있으면 먼저 삭제
+                if (originalPrimaryLinkId) {
+                  console.log(`[Save Network] Unlinking existing Primary link (id: ${originalPrimaryLinkId}) for interface ${interfaceName}`)
+                  
+                  const unlinkResponse = await axios.post(
+                    `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                    null,
+                    {
+                      params: {
+                        maasUrl: apiParams.maasUrl,
+                        apiKey: apiParams.apiKey,
+                        linkId: originalPrimaryLinkId
+                      }
+                    }
+                  )
+                  
+                  if (!unlinkResponse.data || !unlinkResponse.data.success) {
+                    const errorMessage = unlinkResponse.data?.error || 'Unknown error'
+                    console.error(`[Save Network] Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
+                    throw new Error(`Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                  }
+                  
+                  console.log(`[Save Network] Primary link unlinked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
+                }
+                
+                // 새로운 Primary link 생성 (STATIC mode)
+                console.log(`[Save Network] Linking new Primary IP for interface ${interfaceName} (id: ${interfaceIdStr})`)
+                
+                const linkResponse = await axios.post(
+                  `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/link-subnet`,
+                  null,
+                  {
+                    params: {
+                      maasUrl: apiParams.maasUrl,
+                      apiKey: apiParams.apiKey,
+                      ipAddress: ipAddress,
+                      subnetId: subnetId
+                    }
+                  }
+                )
+                
+                if (!linkResponse.data || !linkResponse.data.success) {
+                  const errorMessage = linkResponse.data?.error || 'Unknown error'
+                  console.error(`[Save Network] Failed to link Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
+                  throw new Error(`Failed to link Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                }
+                
+                console.log(`[Save Network] Primary IP linked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
+              }
+            }
+          
+            // 3. Secondary IPs 처리
+            const originalSecondaryIps = networkInterface.originalSecondaryIpAddresses || []
+            const currentSecondaryIps = networkInterface.secondaryIpAddresses || []
+            
+            // 3-1. 삭제된 Secondary IP 처리 (originalLinkId가 있지만 현재 배열에 없는 것)
+            for (const originalSecIp of originalSecondaryIps) {
+              if (originalSecIp.originalLinkId) {
+                // 현재 배열에 같은 originalLinkId가 있는지 확인
+                const stillExists = currentSecondaryIps.some(secIp => secIp.originalLinkId === originalSecIp.originalLinkId)
+                
+                if (!stillExists) {
+                  // 삭제된 Secondary IP - unlink 호출
+                  console.log(`[Save Network] Unlinking deleted Secondary link (id: ${originalSecIp.originalLinkId}) for interface ${interfaceName}`)
+                  
                   const unlinkResponse = await axios.post(
                     `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
                     null,
@@ -1846,38 +2117,29 @@ export default {
                   }
                   
                   console.log(`[Save Network] Secondary link unlinked successfully for interface ${interfaceName}`)
-                } catch (err) {
-                  if (err.response && err.response.data && err.response.data.error) {
-                    const errorMessage = err.response.data.error
-                    console.error(`[Save Network] Failed to unlink Secondary link for interface ${interfaceName}:`, errorMessage)
-                    throw new Error(`Failed to unlink Secondary link for interface ${interfaceName}: ${errorMessage}`)
-                  }
-                  throw err
                 }
               }
             }
-          }
-          
-          // 3-2. 새로운 또는 변경된 Secondary IP 처리
-          for (const secondaryIp of currentSecondaryIps) {
-            const subnet = secondaryIp.subnet
             
-            if (!subnet || !subnet.id) {
-              // Subnet이 없으면 건너뛰기 (새로 추가한 항목이 아직 subnet을 선택하지 않은 경우)
-              console.warn(`[Save Network] Secondary IP를 저장하려면 Subnet이 필요합니다. 건너뜁니다. (Interface: ${interfaceName})`)
-              continue
-            }
-            
-            const subnetId = String(subnet.id)
-            const ipAddress = secondaryIp.address ? secondaryIp.address.trim() : ''
-            const hasIpAddress = ipAddress && !secondaryIp.invalid
-            const isNewSecondaryIp = !secondaryIp.originalLinkId // originalLinkId가 없으면 새로운 Secondary IP
-            
-            if (isNewSecondaryIp) {
-              // 새로운 Secondary IP - link 호출
-              console.log(`[Save Network] Linking new Secondary IP for interface ${interfaceName}: ip=${ipAddress || 'AUTO'}, subnetId=${subnetId}, hasIpAddress=${hasIpAddress}`)
+            // 3-2. 새로운 또는 변경된 Secondary IP 처리
+            for (const secondaryIp of currentSecondaryIps) {
+              const subnet = secondaryIp.subnet
               
-              try {
+              if (!subnet || !subnet.id) {
+                // Subnet이 없으면 건너뛰기 (새로 추가한 항목이 아직 subnet을 선택하지 않은 경우)
+                console.warn(`[Save Network] Secondary IP를 저장하려면 Subnet이 필요합니다. 건너뜁니다. (Interface: ${interfaceName})`)
+                continue
+              }
+              
+              const subnetId = String(subnet.id)
+              const ipAddress = secondaryIp.address ? secondaryIp.address.trim() : ''
+              const hasIpAddress = ipAddress && !secondaryIp.invalid
+              const isNewSecondaryIp = !secondaryIp.originalLinkId // originalLinkId가 없으면 새로운 Secondary IP
+              
+              if (isNewSecondaryIp) {
+                // 새로운 Secondary IP - link 호출
+                console.log(`[Save Network] Linking new Secondary IP for interface ${interfaceName}: ip=${ipAddress || 'AUTO'}, subnetId=${subnetId}, hasIpAddress=${hasIpAddress}`)
+                
                 // IP가 없으면 params에서 ipAddress를 제외 (백엔드에서 AUTO mode로 처리)
                 const linkParams = {
                   maasUrl: apiParams.maasUrl,
@@ -1909,26 +2171,17 @@ export default {
                 }
                 
                 console.log(`[Save Network] Secondary IP linked successfully for interface ${interfaceName}`)
-              } catch (err) {
-                if (err.response && err.response.data && err.response.data.error) {
-                  const errorMessage = err.response.data.error
-                  console.error(`[Save Network] Failed to link Secondary IP for interface ${interfaceName}:`, errorMessage)
-                  throw new Error(`Failed to link Secondary IP for interface ${interfaceName}: ${errorMessage}`)
-                }
-                throw err
-              }
-            } else {
-              // 기존 Secondary IP가 변경된 경우 (IP 주소나 Subnet이 변경된 경우)
-              // 기존 link 삭제 후 새로 생성
-              const originalSecIp = originalSecondaryIps.find(orig => orig.originalLinkId === secondaryIp.originalLinkId)
-              const ipChanged = originalSecIp && originalSecIp.address !== ipAddress
-              const subnetChanged = originalSecIp && originalSecIp.subnet?.id !== subnet.id
-              
-              if (ipChanged || subnetChanged) {
-                console.log(`[Save Network] Updating Secondary IP for interface ${interfaceName}: ip changed=${ipChanged}, subnet changed=${subnetChanged}`)
+              } else {
+                // 기존 Secondary IP가 변경된 경우 (IP 주소나 Subnet이 변경된 경우)
+                // 기존 link 삭제 후 새로 생성
+                const originalSecIp = originalSecondaryIps.find(orig => orig.originalLinkId === secondaryIp.originalLinkId)
+                const ipChanged = originalSecIp && originalSecIp.address !== ipAddress
+                const subnetChanged = originalSecIp && originalSecIp.subnet?.id !== subnet.id
                 
-                // 기존 link 삭제
-                try {
+                if (ipChanged || subnetChanged) {
+                  console.log(`[Save Network] Updating Secondary IP for interface ${interfaceName}: ip changed=${ipChanged}, subnet changed=${subnetChanged}`)
+                  
+                  // 기존 link 삭제
                   const unlinkResponse = await axios.post(
                     `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
                     null,
@@ -1948,17 +2201,8 @@ export default {
                   }
                   
                   console.log(`[Save Network] Secondary link unlinked successfully for interface ${interfaceName}`)
-                } catch (err) {
-                  if (err.response && err.response.data && err.response.data.error) {
-                    const errorMessage = err.response.data.error
-                    console.error(`[Save Network] Failed to unlink Secondary link for interface ${interfaceName}:`, errorMessage)
-                    throw new Error(`Failed to unlink Secondary link for interface ${interfaceName}: ${errorMessage}`)
-                  }
-                  throw err
-                }
-                
-                // 새로운 link 생성
-                try {
+                  
+                  // 새로운 link 생성
                   // IP가 없으면 params에서 ipAddress를 제외 (백엔드에서 AUTO mode로 처리)
                   const linkParams = {
                     maasUrl: apiParams.maasUrl,
@@ -1985,28 +2229,41 @@ export default {
                   }
                   
                   console.log(`[Save Network] Secondary IP linked successfully for interface ${interfaceName}`)
-                } catch (err) {
-                  if (err.response && err.response.data && err.response.data.error) {
-                    const errorMessage = err.response.data.error
-                    console.error(`[Save Network] Failed to link Secondary IP for interface ${interfaceName}:`, errorMessage)
-                    throw new Error(`Failed to link Secondary IP for interface ${interfaceName}: ${errorMessage}`)
-                  }
-                  throw err
                 }
               }
             }
+            
+            console.log(`[Save Network] Successfully saved all changes for interface ${interfaceName}`)
+          } catch (err) {
+            // 각 인터페이스별 에러를 수집하고 다음 인터페이스 계속 처리
+            const errorMessage = err.response?.data?.error || err.message || 'Unknown error'
+            console.error(`[Save Network] Error saving interface ${interfaceName}:`, errorMessage)
+            saveErrors.push({
+              interface: interfaceName,
+              error: errorMessage
+            })
           }
         }
         
-        console.log('All network changes saved successfully')
+        // 에러가 있으면 표시
+        if (saveErrors.length > 0) {
+          const errorMessages = saveErrors.map(e => `${e.interface}: ${e.error}`).join('\n')
+          console.error(`[Save Network] Errors occurred for ${saveErrors.length} interface(s):`, errorMessages)
+          networkError.value = `일부 인터페이스 저장 실패 (${saveErrors.length}/${networkInterfaces.value.length}):\n${errorMessages}`
+        } else {
+          console.log('All network changes saved successfully')
+        }
         
-        // 저장 후 머신 목록 다시 로드
+        // 저장 후 머신 목록 다시 로드 (에러가 있어도 성공한 인터페이스는 반영)
         await loadMachines()
         
-        // 모달 닫기
-        closeNetworkModal()
+        // 에러가 없으면 모달 닫기
+        if (saveErrors.length === 0) {
+          closeNetworkModal()
+        }
         
       } catch (err) {
+        // 예상치 못한 에러 (전체 프로세스 실패)
         console.error('Error saving network changes:', err)
         networkError.value = err.response?.data?.error || err.message || 'Failed to save network changes'
       } finally {
@@ -2023,23 +2280,23 @@ export default {
       if (!newMessage) return
       
       // 디버깅: abort 문제 파악을 위해 모든 메시지 로그
-      console.log('🔔 [WebSocket Debug] 메시지 수신 at', new Date().toLocaleTimeString(), ':', {
-        type: newMessage.type,
-        method: newMessage.method,
-        name: newMessage.name,
-        action: newMessage.action,
-        fullMessage: newMessage
-      })
+      // console.log('🔔 [WebSocket Debug] 메시지 수신 at', new Date().toLocaleTimeString(), ':', {
+      //   type: newMessage.type,
+      //   method: newMessage.method,
+      //   name: newMessage.name,
+      //   action: newMessage.action,
+      //   fullMessage: newMessage
+      // })
       
       // 재연결 알림 처리
       if (newMessage.type === 'reconnect') {
-        console.log('🔄 [WebSocket] 재연결 감지 - machine 상태 업데이트 재시작')
+        // console.log('🔄 [WebSocket] 재연결 감지 - machine 상태 업데이트 재시작')
         return
       }
       
       // pong 메시지는 heartbeat 응답이므로 처리하지 않음
       if (newMessage.method === 'pong') {
-        console.log('💓 [WebSocket] Pong received at', new Date().toLocaleTimeString())
+        // console.log('💓 [WebSocket] Pong received at', new Date().toLocaleTimeString())
         return
       }
       
@@ -2066,24 +2323,24 @@ export default {
       // name이 'machine'인 경우만 처리
       
       // 디버깅: abort 후 메시지 확인을 위해 로그 활성화
-      if (newMessage.type === 2) {
-        console.log('🔍 [WebSocket Debug] Type 2 message received:', {
-          type: newMessage.type,
-          name: newMessage.name,
-          action: newMessage.action,
-          hasData: !!newMessage.data,
-          dataKeys: newMessage.data ? Object.keys(newMessage.data) : []
-        })
-        
-        if (newMessage.data && newMessage.name === 'machine') {
-          console.log('🔍 [WebSocket Debug] Machine message details:', {
-            system_id: newMessage.data.system_id,
-            status: newMessage.data.status,
-            status_type: typeof newMessage.data.status,
-            action: newMessage.action
-          })
-        }
-      }
+      // if (newMessage.type === 2) {
+      //   console.log('🔍 [WebSocket Debug] Type 2 message received:', {
+      //     type: newMessage.type,
+      //     name: newMessage.name,
+      //     action: newMessage.action,
+      //     hasData: !!newMessage.data,
+      //     dataKeys: newMessage.data ? Object.keys(newMessage.data) : []
+      //   })
+      //   
+      //   if (newMessage.data && newMessage.name === 'machine') {
+      //     console.log('🔍 [WebSocket Debug] Machine message details:', {
+      //       system_id: newMessage.data.system_id,
+      //       status: newMessage.data.status,
+      //       status_type: typeof newMessage.data.status,
+      //       action: newMessage.action
+      //     })
+      //   }
+      // }
       
       if (newMessage.type === 2 && newMessage.data && newMessage.name === 'machine') {
         // console.log('🔍 Processing machine event:', newMessage.name, newMessage.action)
@@ -2092,24 +2349,24 @@ export default {
         
         if (newMessage.action === 'update') {
           const machineIndex = machines.value.findIndex(m => m.id === machineData.system_id)
-          console.log('🔍 [WebSocket Debug] Machine update details:', {
-            system_id: machineData.system_id,
-            found_index: machineIndex,
-            raw_status: machineData.status,
-            status_type: typeof machineData.status,
-            status_message: machineData.status_message,
-            old_status: machineIndex !== -1 ? machines.value[machineIndex].status : 'N/A'
-          })
+          // console.log('🔍 [WebSocket Debug] Machine update details:', {
+          //   system_id: machineData.system_id,
+          //   found_index: machineIndex,
+          //   raw_status: machineData.status,
+          //   status_type: typeof machineData.status,
+          //   status_message: machineData.status_message,
+          //   old_status: machineIndex !== -1 ? machines.value[machineIndex].status : 'N/A'
+          // })
           
           if (machineIndex !== -1) {
             const oldStatus = machines.value[machineIndex].status
             const newStatus = getStatusName(machineData.status)
             
-            console.log(`✅ [WebSocket Debug] Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
+            // console.log(`✅ [WebSocket Debug] Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
             
             // Ready 상태로 변경될 때 머신 정보를 다시 가져오기 (커미셔닝 후 네트워크 정보가 변경될 수 있음)
             if (newStatus === 'ready' && oldStatus !== 'ready') {
-              console.log(`🔄 [WebSocket Debug] Status changed to Ready, refreshing machine details for: ${machineData.system_id}`)
+              // console.log(`🔄 [WebSocket Debug] Status changed to Ready, refreshing machine details for: ${machineData.system_id}`)
               refreshMachineDetails(machineData.system_id)
             }
             
@@ -2123,7 +2380,7 @@ export default {
             }
             // console.log(`✅ Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
           } else {
-            console.log(`❌ [WebSocket Debug] Machine not found in list: ${machineData.system_id}`)
+            // console.log(`❌ [WebSocket Debug] Machine not found in list: ${machineData.system_id}`)
           }
         } else if (newMessage.action === 'create') {
           const newMachine = {
@@ -2207,6 +2464,8 @@ export default {
         saveNetworkChanges,
         updateFabricForInterface,
         validatePrimaryIpAddress,
+        handlePrimaryIpFocus,
+        handleIpAssignmentChange,
         validateSecondaryIpAddress,
         addSecondaryIp,
         removeSecondaryIp,
