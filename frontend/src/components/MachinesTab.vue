@@ -101,7 +101,7 @@
           <span :class="['status-badge', machine.status]">
                   {{ getStatusText(machine.status) }}
           </span>
-                <div v-if="machine.status_message" class="status-message">
+                <div v-if="machine.status_message && isStatusInProgress(machine.status)" class="status-message">
                   {{ machine.status_message }}
                 </div>
               </div>
@@ -138,13 +138,25 @@
             </td>
                    <td class="actions-col">
                      <div class="action-buttons">
+                       <!-- Failed Deployment 상태일 때는 Release 버튼 표시 -->
                        <button 
-                         class="btn-small"
-                         :class="machine.status === 'commissioning' ? 'btn-warning' : (machine.status === 'ready' || machine.status === 'allocated' || machine.status === 'deployed' ? 'btn-success-light' : 'btn-success')"
-                         @click="machine.status === 'commissioning' ? abortCommissioning(machine) : commissionMachine(machine)"
-                         :disabled="machine.status === 'commissioning' ? abortingMachines.includes(machine.id) : (!canCommission(machine) || commissioningMachines.includes(machine.id))"
+                         v-if="isFailedDeployment(machine.status)"
+                         class="btn-small btn-release"
+                         @click="releaseMachine(machine)"
+                         :disabled="releasingMachines.includes(machine.id)"
                        >
-                         <span v-if="machine.status === 'commissioning'">
+                         <span v-if="releasingMachines.includes(machine.id)">...</span>
+                         <span v-else>Release</span>
+                       </button>
+                       <!-- 그 외 상태에서는 Commission 버튼 표시 -->
+                       <button 
+                         v-else
+                         class="btn-small"
+                         :class="getCommissionButtonClass(machine)"
+                         @click="handleCommissionButtonClick(machine)"
+                         :disabled="getCommissionButtonDisabled(machine)"
+                       >
+                         <span v-if="machine.status?.toLowerCase() === 'commissioning'">
                            <span v-if="abortingMachines.includes(machine.id)">...</span>
                            <span v-else>Abort</span>
                          </span>
@@ -154,19 +166,30 @@
                          </span>
                        </button>
                        <button 
-                         class="btn-small btn-primary"
+                         class="btn-small"
+                         :class="getNetworkButtonClass(machine)"
                          @click="showNetworkModal(machine)"
+                         :disabled="getNetworkButtonDisabled(machine)"
                        >
                          Network
                        </button>
                        <button 
                          class="btn-small"
-                         :class="machine.status === 'ready' ? 'btn-deploy' : 'btn-secondary'"
-                         @click="deployMachine(machine)"
-                         :disabled="machine.status !== 'ready' || deployingMachines.includes(machine.id)"
+                         :class="getDeployButtonClass(machine)"
+                         @click="handleDeployButtonClick(machine)"
+                         :disabled="getDeployButtonDisabled(machine)"
                        >
-                         <span v-if="deployingMachines.includes(machine.id)">...</span>
-                         <span v-else>Deploy</span>
+                         <span v-if="machine.status?.toLowerCase() === 'deploying'">
+                           <span v-if="abortingDeployMachines.includes(machine.id)">...</span>
+                           <span v-else>Abort</span>
+                         </span>
+                         <span v-else-if="machine.status?.toLowerCase() === 'deployed'">
+                           Deployed
+                         </span>
+                         <span v-else>
+                           <span v-if="deployingMachines.includes(machine.id)">...</span>
+                           <span v-else>Deploy</span>
+                         </span>
                        </button>
                      </div>
                    </td>
@@ -382,7 +405,7 @@
             <button type="button" class="btn-secondary" @click="closeNetworkModal">
               Cancel
             </button>
-            <button type="button" class="btn-primary" @click="saveNetworkChanges" :disabled="savingNetwork">
+            <button type="button" class="btn-primary" @click="saveNetworkChanges" :disabled="savingNetwork || !canSaveNetworkChanges(selectedMachine)">
               <span v-if="savingNetwork">Saving...</span>
               <span v-else>Save Changes</span>
             </button>
@@ -523,6 +546,10 @@ export default {
     
     // Deploy Machine
     const deployingMachines = ref([])
+    const abortingDeployMachines = ref([])
+    
+    // Release Machine
+    const releasingMachines = ref([])
     
     // Network Modal
     const showNetworkModalState = ref(false)
@@ -581,7 +608,7 @@ export default {
             machines.value[machineIndex] = {
               ...machines.value[machineIndex],
               hostname: machineData.hostname,
-              status: getStatusName(machineData.status),
+              status: getStatusName(machineData.status_name || machineData.status),
               status_message: machineData.status_message,
               ip_addresses: machineData.ip_addresses || [],
               mac_addresses: extractMacAddresses(machineData),
@@ -630,7 +657,7 @@ export default {
           machines.value = response.data.results.map(machine => ({
             id: machine.system_id,
             hostname: machine.hostname,
-            status: getStatusName(machine.status),
+            status: getStatusName(machine.status_name || machine.status),
             status_message: machine.status_message,
             ip_addresses: machine.ip_addresses || [],
             mac_addresses: extractMacAddresses(machine),
@@ -738,6 +765,8 @@ export default {
       
       // 문자열인 경우 (이미 변환된 상태)
       if (typeof statusCode === 'string') {
+        const normalizedStatus = statusCode.toLowerCase().trim()
+        
         const stringStatusMap = {
           'new': 'new',
           'commissioning': 'commissioning',
@@ -750,7 +779,14 @@ export default {
           'deploying': 'deploying',
           'allocated': 'allocated'
         }
-        return stringStatusMap[statusCode] || statusCode.toLowerCase() || 'unknown'
+        
+        // 매핑에 있는 경우만 변환하고, 그 외는 원본 상태 문자열 유지 (예: "failed deployment")
+        if (stringStatusMap[normalizedStatus]) {
+          return stringStatusMap[normalizedStatus]
+        }
+        
+        // 매핑에 없는 복합 상태 문자열은 원본 유지 (소문자로 정규화)
+        return normalizedStatus || 'unknown'
       }
       
       console.warn('Unknown status type:', typeof statusCode, statusCode)
@@ -797,7 +833,30 @@ export default {
         'deployed': 'Deployed',
         'failed': 'Failed'
       }
-      return statusMap[status] || status
+      
+      // 매핑에 있는 경우
+      if (statusMap[status]) {
+        return statusMap[status]
+      }
+      
+      // 매핑에 없는 경우 (예: "failed deployment") - 각 단어의 첫 글자를 대문자로 변환
+      if (typeof status === 'string') {
+        return status.split(' ').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join(' ')
+      }
+      
+      return status
+    }
+    
+    const isStatusInProgress = (status) => {
+      if (!status || typeof status !== 'string') {
+        return false
+      }
+      // 상태가 "ing"로 끝나는지 확인 (예: "commissioning", "deploying")
+      // 또는 "erasing"으로 끝나는지 확인 (예: "disk erasing")
+      const normalizedStatus = status.toLowerCase().trim()
+      return normalizedStatus.endsWith('ing') || normalizedStatus.endsWith('erasing')
     }
     
     const toggleSelectAll = () => {
@@ -914,6 +973,114 @@ export default {
       return true
     }
     
+    // Failed Deployment 또는 Failed Disk Erasing 상태인지 확인하는 함수 (Release 버튼 표시)
+    const isFailedDeployment = (status) => {
+      if (!status || typeof status !== 'string') {
+        return false
+      }
+      const normalizedStatus = status.toLowerCase().trim()
+      // "failed deployment" 또는 "failed disk erasing" 상태
+      return normalizedStatus === 'failed deployment' || 
+             normalizedStatus.startsWith('failed deployment') ||
+             normalizedStatus === 'failed disk erasing' ||
+             normalizedStatus.startsWith('failed disk erasing')
+    }
+    
+    // Commission 버튼의 클래스를 결정하는 함수
+    const getCommissionButtonClass = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      if (status === 'commissioning') {
+        return 'btn-warning' // Abort 버튼 (주황색)
+      } else if (status === 'deploying' || status === 'disk erasing') {
+        return 'btn-secondary' // 회색 disabled 버튼
+      } else if (status === 'ready' || status === 'allocated' || status === 'deployed') {
+        return 'btn-success-light' // 연한 녹색 (재커미셔닝 가능)
+      } else if (status.startsWith('failed') && !isFailedDeployment(status)) {
+        // "failed" 상태는 일반 녹색 (단, "failed deployment"는 제외)
+        return 'btn-success'
+      } else {
+        return 'btn-success' // 일반 녹색 (New 등)
+      }
+    }
+    
+    // Commission 버튼의 disabled 상태를 결정하는 함수
+    const getCommissionButtonDisabled = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      if (status === 'commissioning') {
+        // Commissioning 중일 때는 Abort 버튼이므로 abortingMachines에 포함되어 있으면 disabled
+        return abortingMachines.value.includes(machine.id)
+      } else if (status === 'deploying' || status === 'disk erasing') {
+        // Deploying 또는 Disk Erasing 상태일 때는 항상 disabled
+        return true
+      } else {
+        // 그 외 상태에서는 canCommission 체크와 commissioningMachines 체크
+        return !canCommission(machine) || commissioningMachines.value.includes(machine.id)
+      }
+    }
+    
+    // Commission 버튼 클릭 핸들러
+    const handleCommissionButtonClick = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      if (status === 'commissioning') {
+        abortCommissioning(machine)
+      } else {
+        commissionMachine(machine)
+      }
+    }
+    
+    // Network 버튼의 클래스를 결정하는 함수
+    const getNetworkButtonClass = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      // 진행 중인 상태: 회색 disabled
+      if (status === 'commissioning' || status === 'deploying' || status === 'disk erasing') {
+        return 'btn-secondary'
+      }
+      
+      // Ready, Allocated: 현재 그대로 (파란색)
+      if (status === 'ready' || status === 'allocated') {
+        return 'btn-primary'
+      }
+      
+      // New, Failed xxx, Deployed: 연한 파랑
+      if (status === 'new' || status === 'deployed' || status.startsWith('failed')) {
+        return 'btn-primary-light'
+      }
+      
+      // 기본값: 파란색
+      return 'btn-primary'
+    }
+    
+    // Network 버튼의 disabled 상태를 결정하는 함수
+    const getNetworkButtonDisabled = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      // 진행 중인 상태: disabled
+      if (status === 'commissioning' || status === 'deploying' || status === 'disk erasing') {
+        return true
+      }
+      
+      // 그 외는 활성화
+      return false
+    }
+    
+    // Network 변경사항 저장 가능 여부를 결정하는 함수
+    const canSaveNetworkChanges = (machine) => {
+      if (!machine) return false
+      
+      const status = machine.status?.toLowerCase() || ''
+      
+      // New, Failed xxx, Deployed 상태에서는 저장 불가
+      if (status === 'new' || status === 'deployed' || status.startsWith('failed')) {
+        return false
+      }
+      
+      // Ready, Allocated 상태에서만 저장 가능
+      return status === 'ready' || status === 'allocated'
+    }
+    
     // Polling removed - will be replaced with WebSocket implementation
     
     const commissionMachine = async (machine) => {
@@ -1014,9 +1181,126 @@ export default {
       }
     }
     
+    // Release Machine
+    const releaseMachine = async (machine) => {
+      releasingMachines.value.push(machine.id)
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/release`, null, {
+          params: {
+            maasUrl: apiParams.maasUrl,
+            apiKey: apiParams.apiKey
+          }
+        })
+        
+        if (response.data && response.data.success) {
+          console.log('Machine released successfully:', response.data)
+          // Update only the specific machine's status instead of reloading all machines
+          const machineIndex = machines.value.findIndex(m => m.id === machine.id)
+          if (machineIndex !== -1) {
+            // Update status - release 후 상태는 WebSocket으로 업데이트됨
+            // Status will be updated via WebSocket
+          }
+        } else {
+          error.value = response.data?.error || 'Failed to release machine'
+        }
+        
+      } catch (err) {
+        console.error('Error releasing machine:', err)
+        error.value = err.response?.data?.error || err.message || 'Failed to release machine'
+      } finally {
+        // Remove from releasing list
+        const index = releasingMachines.value.indexOf(machine.id)
+        if (index > -1) {
+          releasingMachines.value.splice(index, 1)
+        }
+      }
+    }
+    
+    // Deploy 버튼의 클래스를 결정하는 함수
+    const getDeployButtonClass = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      if (status === 'deploying') {
+        return 'btn-warning' // Abort 버튼 (주황색)
+      } else if (status === 'deployed') {
+        return 'btn-secondary' // 회색 disabled 버튼
+      } else if (status === 'ready' || status === 'allocated') {
+        return 'btn-deploy' // 옅은 분홍색 (활성화)
+      } else {
+        return 'btn-secondary' // 회색 disabled (New, Commissioning, Failed 등)
+      }
+    }
+    
+    // Deploy 버튼의 disabled 상태를 결정하는 함수
+    const getDeployButtonDisabled = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      if (status === 'deploying') {
+        // Deploying 중일 때는 Abort 버튼이므로 abortingDeployMachines에 포함되어 있으면 disabled
+        return abortingDeployMachines.value.includes(machine.id)
+      } else if (status === 'deployed') {
+        // Deployed 상태일 때는 항상 disabled
+        return true
+      } else if (status === 'ready' || status === 'allocated') {
+        // Ready, Allocated 상태에서는 deployingMachines 체크
+        return deployingMachines.value.includes(machine.id)
+      } else {
+        // New, Commissioning, Failed 등은 항상 disabled
+        return true
+      }
+    }
+    
+    // Deploy 버튼 클릭 핸들러
+    const handleDeployButtonClick = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      if (status === 'deploying') {
+        abortDeploy(machine)
+      } else {
+        deployMachine(machine)
+      }
+    }
+    
+    // Deploy 중단 함수
+    const abortDeploy = async (machine) => {
+      if (machine.status !== 'deploying') {
+        return
+      }
+      
+      abortingDeployMachines.value.push(machine.id)
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/abort`, null, {
+          params: {
+            maasUrl: apiParams.maasUrl,
+            apiKey: apiParams.apiKey
+          }
+        })
+        
+        if (response.data && response.data.success) {
+          console.log('Machine deployment aborted successfully:', response.data)
+          // Status will be updated via WebSocket
+        } else {
+          error.value = response.data?.error || 'Failed to abort deployment'
+        }
+        
+      } catch (err) {
+        console.error('Error aborting deployment:', err)
+        error.value = err.response?.data?.error || err.message || 'Failed to abort deployment'
+      } finally {
+        // Remove from aborting list
+        const index = abortingDeployMachines.value.indexOf(machine.id)
+        if (index > -1) {
+          abortingDeployMachines.value.splice(index, 1)
+        }
+      }
+    }
+    
     // Deploy Machine
     const deployMachine = async (machine) => {
-      if (machine.status !== 'ready') {
+      if (machine.status !== 'ready' && machine.status !== 'allocated') {
         return
       }
       
@@ -2468,7 +2752,7 @@ export default {
           
           if (machineIndex !== -1) {
             const oldStatus = machines.value[machineIndex].status
-            const newStatus = getStatusName(machineData.status)
+            const newStatus = getStatusName(machineData.status_name || machineData.status)
             
             // console.log(`✅ [WebSocket Debug] Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
             
@@ -2494,7 +2778,7 @@ export default {
           const newMachine = {
             id: machineData.system_id,
             hostname: machineData.hostname,
-            status: getStatusName(machineData.status),
+            status: getStatusName(machineData.status_name || machineData.status),
             status_message: machineData.status_message,
             ip_addresses: machineData.ip_addresses || [],
             mac_addresses: extractMacAddresses(machineData),
@@ -2542,6 +2826,7 @@ export default {
         formatStorage,
         extractMacAddresses,
         getStatusText,
+        isStatusInProgress,
         toggleSelectAll,
         // Add Machine Modal
         showAddModal,
@@ -2556,9 +2841,20 @@ export default {
         commissioningMachines,
         abortingMachines,
         deployingMachines,
+        abortingDeployMachines,
+        releasingMachines,
         canCommission,
+        isFailedDeployment,
+        getCommissionButtonClass,
+        getCommissionButtonDisabled,
+        handleCommissionButtonClick,
         commissionMachine,
         abortCommissioning,
+        releaseMachine,
+        getDeployButtonClass,
+        getDeployButtonDisabled,
+        handleDeployButtonClick,
+        abortDeploy,
         deployMachine,
         // Network Modal
         showNetworkModalState,
@@ -2569,6 +2865,9 @@ export default {
         savingNetwork,
         availableFabrics,
         availableSubnets,
+        getNetworkButtonClass,
+        getNetworkButtonDisabled,
+        canSaveNetworkChanges,
         showNetworkModal,
         closeNetworkModal,
         saveNetworkChanges,
@@ -2940,6 +3239,25 @@ export default {
   background-color: #0056b3;
 }
 
+.btn-small.btn-primary-light {
+  background-color: #a8d0f0; /* 연한 파랑 */
+  color: white;
+  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
+  padding: 0.25rem 0.4rem;
+}
+
+.btn-small.btn-primary-light:hover:not(:disabled) {
+  background-color: #8fc0e0; /* 약간 더 진한 연한 파랑 */
+}
+
+.btn-small.btn-primary-light:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .btn-small.btn-secondary {
   background-color: #6c757d;
   color: white;
@@ -3026,6 +3344,25 @@ export default {
 }
 
 .btn-small.btn-deploy:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-small.btn-release {
+  background-color: #f5a5a5; /* 연한 빨강 계열 */
+  color: white;
+  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
+  padding: 0.25rem 0.5rem;
+}
+
+.btn-small.btn-release:hover:not(:disabled) {
+  background-color: #f18f8f; /* 약간 더 진한 연한 빨강 */
+}
+
+.btn-small.btn-release:disabled {
   background-color: #6c757d;
   cursor: not-allowed;
   opacity: 0.6;

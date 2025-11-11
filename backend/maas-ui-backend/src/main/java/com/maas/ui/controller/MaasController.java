@@ -205,6 +205,23 @@ public class MaasController {
     /**
      * 머신을 배포합니다.
      */
+    @PostMapping("/machines/{systemId}/release")
+    public Mono<ResponseEntity<Map<String, Object>>> releaseMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.releaseMachine(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to release machine")));
+    }
+    
     @PostMapping("/machines/{systemId}/deploy")
     public Mono<ResponseEntity<Map<String, Object>>> deployMachine(
             @PathVariable String systemId,

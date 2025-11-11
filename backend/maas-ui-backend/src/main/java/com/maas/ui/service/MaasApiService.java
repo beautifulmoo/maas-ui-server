@@ -172,6 +172,74 @@ public class MaasApiService {
     }
     
     /**
+     * MAAS 서버에서 머신을 릴리스합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return 릴리스 결과
+     */
+    public Mono<Map<String, Object>> releaseMachine(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-release";
+        
+        System.out.println("Release Machine - URL: " + url);
+        System.out.println("Release Machine - systemId: " + systemId);
+        
+        Map<String, String> formData = new HashMap<>();
+        formData.put("force", "true");
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .bodyValue(formData)
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Release Machine API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Release Machine API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", true);
+                        result.put("data", jsonNode);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Release Machine JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Release Machine API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    String errorMessage = throwable.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + throwable.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", errorMessage);
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
      * MAAS 서버에서 머신을 배포합니다.
      * 
      * @param maasUrl MAAS 서버 URL
