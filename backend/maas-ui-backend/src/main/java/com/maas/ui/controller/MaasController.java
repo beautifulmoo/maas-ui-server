@@ -86,6 +86,26 @@ public class MaasController {
     }
     
     /**
+     * 특정 머신의 block devices 정보를 가져옵니다.
+     */
+    @GetMapping("/machines/{systemId}/block-devices")
+    public Mono<ResponseEntity<Map<String, Object>>> getMachineBlockDevices(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.getMachineBlockDevices(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to fetch machine block devices")));
+    }
+    
+    /**
      * MAAS 서버 연결을 테스트합니다.
      */
     @GetMapping("/test-connection")
@@ -180,6 +200,26 @@ public class MaasController {
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to abort commissioning")));
+    }
+    
+    /**
+     * 머신을 배포합니다.
+     */
+    @PostMapping("/machines/{systemId}/deploy")
+    public Mono<ResponseEntity<Map<String, Object>>> deployMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.deployMachine(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to deploy machine")));
     }
     
     /**

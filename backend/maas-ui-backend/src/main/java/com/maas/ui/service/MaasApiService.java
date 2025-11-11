@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
 
 @Service
 public class MaasApiService {
@@ -165,6 +167,70 @@ public class MaasApiService {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("success", false);
                     errorResult.put("error", "Failed to abort commissioning: " + e.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * MAAS 서버에서 머신을 배포합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return 배포 결과
+     */
+    public Mono<Map<String, Object>> deployMachine(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-deploy";
+        
+        System.out.println("Deploy Machine - URL: " + url);
+        System.out.println("Deploy Machine - systemId: " + systemId);
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Deploy Machine API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Deploy Machine API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", true);
+                        result.put("data", jsonNode);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Deploy Machine JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Deploy Machine API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    String errorMessage = throwable.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + throwable.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", errorMessage);
                     return Mono.just(errorResult);
                 });
     }
@@ -768,10 +834,10 @@ public class MaasApiService {
                     for (JsonNode machine : results) {
                         if (machine.has("status")) {
                             int status = machine.get("status").asInt();
-                            if (status == 4) { // Commissioned
-                        commissionedMachines++;
+                            if (status == 4 || status == 10) { // Ready (Commissioned) or Allocated
+                                commissionedMachines++;
                             } else if (status == 6) { // Deployed
-                        deployedMachines++;
+                                deployedMachines++;
                             }
                         }
                     }
@@ -786,5 +852,82 @@ public class MaasApiService {
             "commissioned", commissionedMachines,
             "deployed", deployedMachines
         );
+    }
+    
+    /**
+     * MAAS 서버에서 특정 머신의 block devices 정보를 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return block devices 정보가 담긴 Map
+     */
+    public Mono<Map<String, Object>> getMachineBlockDevices(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/block_devices/";
+        
+        System.out.println("Get Machine Block Devices - URL: " + url);
+        System.out.println("Get Machine Block Devices - systemId: " + systemId);
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Block Devices API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        
+                        // MAAS API는 직접 배열을 반환하거나 {"results": [...]} 형태로 반환할 수 있음
+                        if (jsonNode.isArray()) {
+                            // 직접 배열 형태인 경우 - JsonNode를 List로 변환
+                            System.out.println("Direct array response found: " + jsonNode.size() + " block devices");
+                            List<Map<String, Object>> blockDevicesList = new ArrayList<>();
+                            for (JsonNode deviceNode : jsonNode) {
+                                blockDevicesList.add(objectMapper.convertValue(deviceNode, Map.class));
+                            }
+                            result.put("results", blockDevicesList);
+                            result.put("count", blockDevicesList.size());
+                        } else if (jsonNode.has("results")) {
+                            // {"results": [...]} 형태인 경우
+                            JsonNode results = jsonNode.get("results");
+                            System.out.println("Results field found: " + results.size() + " block devices");
+                            List<Map<String, Object>> blockDevicesList = new ArrayList<>();
+                            if (results.isArray()) {
+                                for (JsonNode deviceNode : results) {
+                                    blockDevicesList.add(objectMapper.convertValue(deviceNode, Map.class));
+                                }
+                            }
+                            result.put("results", blockDevicesList);
+                            if (jsonNode.has("count")) {
+                                result.put("count", jsonNode.get("count").asInt());
+                            } else {
+                                result.put("count", blockDevicesList.size());
+                            }
+                        } else {
+                            System.out.println("Unexpected response format");
+                            result.put("results", new ArrayList<>());
+                            result.put("count", 0);
+                        }
+                        
+                        System.out.println("Final block devices result: " + result);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Block Devices API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
     }
 }

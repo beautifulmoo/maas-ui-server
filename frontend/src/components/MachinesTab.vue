@@ -107,9 +107,12 @@
               </div>
             </td>
             <td class="owner-col">
-              <span class="owner">{{ machine.owner || '-' }}</span>
-              <div class="tags" v-if="machine.tags && machine.tags.length > 0">
-                <span v-for="tag in machine.tags" :key="tag" class="tag">{{ tag }}</span>
+              <div class="owner-info">
+                <span class="owner" v-if="machine.owner">{{ machine.owner }}</span>
+                <span class="owner" v-else>-</span>
+                <div class="tags" v-if="machine.tags && machine.tags.length > 0">
+                  <span v-for="tag in machine.tags" :key="tag" class="tag">{{ tag }}</span>
+                </div>
               </div>
             </td>
             <td class="pool-col">
@@ -137,7 +140,7 @@
                      <div class="action-buttons">
                        <button 
                          class="btn-small"
-                         :class="machine.status === 'commissioning' ? 'btn-warning' : 'btn-success'"
+                         :class="machine.status === 'commissioning' ? 'btn-warning' : (machine.status === 'ready' || machine.status === 'allocated' || machine.status === 'deployed' ? 'btn-success-light' : 'btn-success')"
                          @click="machine.status === 'commissioning' ? abortCommissioning(machine) : commissionMachine(machine)"
                          :disabled="machine.status === 'commissioning' ? abortingMachines.includes(machine.id) : (!canCommission(machine) || commissioningMachines.includes(machine.id))"
                        >
@@ -155,6 +158,15 @@
                          @click="showNetworkModal(machine)"
                        >
                          Network
+                       </button>
+                       <button 
+                         class="btn-small"
+                         :class="machine.status === 'ready' ? 'btn-deploy' : 'btn-secondary'"
+                         @click="deployMachine(machine)"
+                         :disabled="machine.status !== 'ready' || deployingMachines.includes(machine.id)"
+                       >
+                         <span v-if="deployingMachines.includes(machine.id)">...</span>
+                         <span v-else>Deploy</span>
                        </button>
                      </div>
                    </td>
@@ -509,6 +521,9 @@ export default {
     const commissioningMachines = ref([])
     const abortingMachines = ref([])
     
+    // Deploy Machine
+    const deployingMachines = ref([])
+    
     // Network Modal
     const showNetworkModalState = ref(false)
     const selectedMachine = ref(null)
@@ -573,8 +588,6 @@ export default {
               architecture: machineData.architecture,
               cpu_count: machineData.cpu_count || 0,
               memory: machineData.memory || 0,
-              disk_count: machineData.block_devices?.length || 0,
-              storage: calculateStorage(machineData.block_devices),
               power_state: machineData.power_state,
               owner: machineData.owner,
               tags: machineData.tag_names || [],
@@ -583,6 +596,15 @@ export default {
               fabric: machineData.fabric?.name || '-',
               interface_set: machineData.interface_set || [] // 네트워크 인터페이스 정보 업데이트
             }
+            
+            // blockdevice_set 정보를 사용하여 disk_count와 storage 업데이트
+            const blockDeviceSet = machineData.blockdevice_set || []
+            console.log(`[Refresh] Block device set for ${systemId}:`, blockDeviceSet, `(count: ${blockDeviceSet.length})`)
+            
+            machines.value[machineIndex].disk_count = blockDeviceSet.length || 0
+            machines.value[machineIndex].storage = calculateStorage(blockDeviceSet)
+            console.log(`✅ Updated block devices for ${systemId}: ${machines.value[machineIndex].disk_count} disks, ${formatStorage(machines.value[machineIndex].storage)}`)
+            
             console.log(`✅ Machine details refreshed for: ${systemId}`)
           }
         }
@@ -615,8 +637,8 @@ export default {
             architecture: machine.architecture,
             cpu_count: machine.cpu_count || 0,
             memory: machine.memory || 0,
-            disk_count: machine.block_devices?.length || 0,
-            storage: calculateStorage(machine.block_devices),
+            disk_count: machine.blockdevice_set?.length || 0,
+            storage: calculateStorage(machine.blockdevice_set),
             power_state: machine.power_state,
             owner: machine.owner,
             tags: machine.tag_names || [],
@@ -626,6 +648,42 @@ export default {
             interface_set: machine.interface_set || [] // 네트워크 인터페이스 정보 저장
           }))
           console.log(`✅ Loaded ${machines.value.length} machines via REST API`)
+          
+          // 각 머신의 상세 정보를 가져와서 blockdevice_set 정보 업데이트
+          console.log('🔄 Fetching detailed machine information for disks and storage...')
+          const apiParams = settingsStore.getApiParams.value
+          const detailPromises = machines.value.map(async (machine) => {
+            try {
+              console.log(`[Machine Details] Fetching for machine ${machine.id} (${machine.hostname || 'N/A'})`)
+              const detailResponse = await axios.get(`http://localhost:8081/api/machines/${machine.id}`, {
+                params: apiParams
+              })
+              
+              if (detailResponse.data && !detailResponse.data.error) {
+                const machineData = detailResponse.data
+                const blockDeviceSet = machineData.blockdevice_set || []
+                console.log(`[Machine Details] Block device set for ${machine.id}:`, blockDeviceSet, `(count: ${blockDeviceSet.length})`)
+                
+                const machineIndex = machines.value.findIndex(m => m.id === machine.id)
+                if (machineIndex !== -1) {
+                  machines.value[machineIndex].disk_count = blockDeviceSet.length || 0
+                  machines.value[machineIndex].storage = calculateStorage(blockDeviceSet)
+                  console.log(`✅ Updated disk info for ${machine.hostname || machine.id}: ${machines.value[machineIndex].disk_count} disks, ${formatStorage(machines.value[machineIndex].storage)}`)
+                } else {
+                  console.warn(`[Machine Details] Machine index not found for ${machine.id}`)
+                }
+              } else {
+                console.warn(`[Machine Details] Error in response for ${machine.id}:`, detailResponse.data?.error)
+              }
+            } catch (err) {
+              console.warn(`⚠️ Failed to fetch details for machine ${machine.id}:`, err.message, err.response?.data)
+              // 개별 머신 정보 가져오기 실패해도 계속 진행
+            }
+          })
+          
+          // 모든 상세 정보를 병렬로 가져오기
+          await Promise.all(detailPromises)
+          console.log('✅ Finished updating disk and storage information')
         } else {
           machines.value = []
         }
@@ -699,9 +757,10 @@ export default {
       return 'unknown'
     }
     
-    const calculateStorage = (blockDevices) => {
-      if (!blockDevices || !Array.isArray(blockDevices)) return 0
-      return blockDevices.reduce((total, device) => {
+    const calculateStorage = (blockDeviceSet) => {
+      if (!blockDeviceSet || !Array.isArray(blockDeviceSet)) return 0
+      return blockDeviceSet.reduce((total, device) => {
+        // blockdevice_set의 각 항목의 size 값을 합산
         return total + (device.size || 0)
       }, 0)
     }
@@ -862,9 +921,15 @@ export default {
         return
       }
       
-      // Ready나 Deployed 상태일 때 확인 메시지 표시
-      if (machine.status === 'ready' || machine.status === 'deployed') {
-        const confirmMessage = `이 머신은 이미 Commissioning이 완료되어 ${machine.status === 'ready' ? 'Ready' : 'Deployed'} 상태입니다.\n\n정말로 다시 Commissioning을 진행하시겠습니까?`
+      // Ready, Allocated, Deployed 상태일 때 확인 메시지 표시
+      if (machine.status === 'ready' || machine.status === 'allocated' || machine.status === 'deployed') {
+        let statusText = 'Ready'
+        if (machine.status === 'allocated') {
+          statusText = 'Allocated'
+        } else if (machine.status === 'deployed') {
+          statusText = 'Deployed'
+        }
+        const confirmMessage = `이 머신은 이미 Commissioning이 완료되어 ${statusText} 상태입니다.\n\n정말로 다시 Commissioning을 진행하시겠습니까?`
         if (!window.confirm(confirmMessage)) {
           return // 사용자가 취소하면 진행하지 않음
         }
@@ -945,6 +1010,49 @@ export default {
         const index = abortingMachines.value.indexOf(machine.id)
         if (index > -1) {
           abortingMachines.value.splice(index, 1)
+        }
+      }
+    }
+    
+    // Deploy Machine
+    const deployMachine = async (machine) => {
+      if (machine.status !== 'ready') {
+        return
+      }
+      
+      deployingMachines.value.push(machine.id)
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/deploy`, null, {
+          params: {
+            maasUrl: apiParams.maasUrl,
+            apiKey: apiParams.apiKey
+          }
+        })
+        
+        if (response.data && response.data.success) {
+          console.log('Machine deployed successfully:', response.data)
+          // Update only the specific machine's status instead of reloading all machines
+          const machineIndex = machines.value.findIndex(m => m.id === machine.id)
+          if (machineIndex !== -1) {
+            // Update status to deploying
+            machines.value[machineIndex].status = 'deploying'
+            machines.value[machineIndex].status_message = 'Starting deployment...'
+            // Status will be updated via WebSocket
+          }
+        } else {
+          error.value = response.data?.error || 'Failed to deploy machine'
+        }
+        
+      } catch (err) {
+        console.error('Error deploying machine:', err)
+        error.value = err.response?.data?.error || err.message || 'Failed to deploy machine'
+      } finally {
+        // Remove from deploying list
+        const index = deployingMachines.value.indexOf(machine.id)
+        if (index > -1) {
+          deployingMachines.value.splice(index, 1)
         }
       }
     }
@@ -2393,8 +2501,8 @@ export default {
             architecture: machineData.architecture,
             cpu_count: machineData.cpu_count || 0,
             memory: machineData.memory || 0,
-            disk_count: machineData.block_devices?.length || 0,
-            storage: calculateStorage(machineData.block_devices),
+            disk_count: machineData.blockdevice_set?.length || 0,
+            storage: calculateStorage(machineData.blockdevice_set),
             power_state: machineData.power_state,
             owner: machineData.owner,
             tags: machineData.tag_names || [],
@@ -2447,9 +2555,11 @@ export default {
         // Commission Machine
         commissioningMachines,
         abortingMachines,
+        deployingMachines,
         canCommission,
         commissionMachine,
         abortCommissioning,
+        deployMachine,
         // Network Modal
         showNetworkModalState,
         selectedMachine,
@@ -2642,13 +2752,15 @@ export default {
 }
 
 .status-col {
-  width: 120px; /* 더 넓게 */
+  width: 90px; /* STATUS 컬럼 줄이기 */
+  min-width: 90px;
+  max-width: 90px;
 }
 
 .owner-col {
-  width: 60px !important; /* TAGS가 POOL과 겹치지 않도록 조정 */
-  min-width: 60px;
-  max-width: 60px;
+  width: 120px !important; /* OWNER 표시를 위해 너비 증가 */
+  min-width: 120px;
+  max-width: 120px;
 }
 
 .pool-col {
@@ -2682,9 +2794,20 @@ export default {
 }
 
 .actions-col {
-  width: 140px !important; /* 겹치지 않도록 조정 */
-  min-width: 140px;
-  max-width: 140px;
+  width: 180px !important; /* 버튼들이 한 줄로 보이도록 늘림 */
+  min-width: 180px;
+  max-width: 180px;
+  text-align: left !important; /* 왼쪽 정렬 */
+  vertical-align: top;
+}
+
+.action-buttons-wrapper {
+  display: flex;
+  justify-content: flex-start !important; /* 왼쪽 정렬 강제 */
+  align-items: flex-start;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .machine-name strong {
@@ -2773,16 +2896,25 @@ export default {
 
 .action-buttons {
   display: flex;
-  gap: 0.2rem; /* Reduced gap for tighter spacing */
-  flex-wrap: nowrap; /* Force buttons to stay on one line */
+  flex-direction: row; /* 한 줄로 배치 */
+  gap: 0.2rem; /* Horizontal gap between buttons */
+  align-items: flex-start; /* 왼쪽 정렬 */
+}
+
+.action-buttons-row {
+  display: flex;
+  gap: 0.2rem; /* Horizontal gap between buttons */
+  flex-wrap: nowrap;
+  justify-content: flex-start; /* 왼쪽 정렬 */
 }
 
 .btn-small {
   padding: 0.25rem 0.5rem; /* Increased padding for better height */
   border: none;
-  border-radius: 4px; /* View 버튼과 동일한 곡률로 통일 */
+  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
   cursor: pointer;
-  font-size: 0.7rem; /* 폰트 크기 통일 */
+  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
   transition: all 0.2s ease;
   white-space: nowrap;
   text-align: center;
@@ -2791,39 +2923,112 @@ export default {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  min-width: auto; /* Remove fixed minimum width */
+  width: auto; /* 글자 길이에 맞춤 */
+  min-width: auto; /* 최소 너비 제거 */
 }
 
 .btn-small.btn-primary {
   background-color: #007bff;
   color: white;
+  font-size: 0.7rem; /* 녹색 버튼과 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 녹색 버튼과 동일한 모서리 */
+  padding: 0.25rem 0.4rem; /* Network 버튼 가로 크기 줄이기 */
 }
 
-.btn-small.btn-primary:hover {
+.btn-small.btn-primary:hover:not(:disabled) {
   background-color: #0056b3;
 }
 
 .btn-small.btn-secondary {
   background-color: #6c757d;
   color: white;
+  font-size: 0.7rem; /* 녹색 버튼과 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 녹색 버튼과 동일한 모서리 */
+  padding: 0.25rem 0.5rem; /* Deploy 버튼과 동일한 패딩 */
 }
 
-.btn-small.btn-secondary:hover {
+.btn-small.btn-secondary:hover:not(:disabled) {
   background-color: #545b62;
 }
 
 .btn-small.btn-success {
   background-color: #28a745;
   color: white;
+  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
 }
 
 .btn-small.btn-success:hover:not(:disabled) {
   background-color: #218838;
 }
 
+.btn-small.btn-success-light {
+  background-color: #b0e0b0; /* 더 연한 녹색 */
+  color: white; /* 흰색 텍스트 */
+  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
+}
+
+.btn-small.btn-success-light:hover:not(:disabled) {
+  background-color: #9dd89d; /* 약간 더 진한 연한 녹색 */
+}
+
+.btn-small.btn-success-light:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .btn-small.btn-success:disabled {
   background-color: #6c757d;
   cursor: not-allowed;
+}
+
+.btn-small.btn-warning {
+  background-color: #ffc107;
+  color: #212529;
+  font-size: 0.7rem; /* 녹색 버튼과 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 녹색 버튼과 동일한 모서리 */
+}
+
+.btn-small.btn-warning:hover:not(:disabled) {
+  background-color: #e0a800;
+}
+
+.btn-small.btn-warning:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.btn-small.btn-primary:disabled,
+.btn-small.btn-secondary:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-small.btn-deploy {
+  background-color: #f8b4d4; /* 옅은 분홍색 */
+  color: white; /* 흰색 텍스트 */
+  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
+  font-weight: 500; /* 폰트 굵기 통일 */
+  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
+  padding: 0.25rem 0.5rem; /* 비활성화된 Deploy 버튼과 동일한 패딩 */
+}
+
+.btn-small.btn-deploy:hover:not(:disabled) {
+  background-color: #f5a0c4; /* 약간 더 진한 분홍색 */
+}
+
+.btn-small.btn-deploy:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .pagination {
