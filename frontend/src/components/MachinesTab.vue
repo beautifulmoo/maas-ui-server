@@ -71,7 +71,7 @@
         </thead>
         <tbody>
           <tr 
-        v-for="machine in filteredMachines" 
+        v-for="machine in paginatedMachines" 
         :key="machine.id"
             :class="['machine-row', { selected: selectedMachines.includes(machine.id) }]"
           >
@@ -86,8 +86,8 @@
               <div class="machine-name">
                 <strong>{{ machine.hostname || `Machine ${machine.id}` }}</strong>
                 <div class="machine-details">
-                  <span class="mac-address">{{ machine.mac_addresses?.[0] || 'N/A' }}</span>
-                  <span class="ip-address">{{ machine.ip_addresses?.[0] || 'N/A' }}</span>
+                  <span class="mac-address">{{ machine.mac_addresses?.[0] || '' }}</span>
+                  <span class="ip-address">{{ machine.ip_addresses?.[0] || '' }}</span>
                 </div>
               </div>
             </td>
@@ -205,13 +205,14 @@
     <!-- Pagination -->
     <div class="pagination" v-if="!loading && !error && filteredMachines.length > 0">
       <div class="pagination-info">
-        Showing {{ filteredMachines.length }} out of {{ machines.length }} machines
+        Showing {{ (currentPage - 1) * itemsPerPage + 1 }}-{{ Math.min(currentPage * itemsPerPage, filteredMachines.length) }} of {{ filteredMachines.length }} machines ({{ machines.length }} total)
           </div>
       <div class="pagination-controls">
         <button class="btn-small" :disabled="currentPage === 1" @click="currentPage = 1">
           &lt; Page {{ currentPage }} of {{ totalPages }} &gt;
         </button>
         <select v-model="itemsPerPage" class="page-size-select">
+          <option value="10">10/page</option>
           <option value="25">25/page</option>
           <option value="50">50/page</option>
           <option value="100">100/page</option>
@@ -514,7 +515,6 @@ export default {
     const selectedMachines = ref([])
     const selectAll = ref(false)
     const currentPage = ref(1)
-    const itemsPerPage = ref(25)
     
     // WebSocket 연결
     // ⚠️ 중요: useWebSocket()은 반드시 최상단에서 먼저 호출해야 함
@@ -526,6 +526,9 @@ export default {
     //           WebSocket watch 로직과 분리되어야 함. settingsStore 객체를 직접 참조하지 말고
     //           필요할 때만 getApiParams.value를 사용하도록 함
     const settingsStore = useSettings()
+    
+    // Settings에서 itemsPerPage 값 가져오기
+    const itemsPerPage = ref(settingsStore.settings.itemsPerPage || 25)
     
     // Add Machine Modal
     const showAddModal = ref(false)
@@ -589,6 +592,13 @@ export default {
     
     const totalPages = computed(() => {
       return Math.ceil(filteredMachines.value.length / itemsPerPage.value)
+    })
+    
+    // 페이지네이션이 적용된 머신 목록
+    const paginatedMachines = computed(() => {
+      const start = (currentPage.value - 1) * itemsPerPage.value
+      const end = start + itemsPerPage.value
+      return filteredMachines.value.slice(start, end)
     })
     
     // 개별 머신 정보를 가져와서 업데이트하는 함수
@@ -2768,6 +2778,8 @@ export default {
               status_message: machineData.status_message,
               power_state: machineData.power_state,
               hostname: machineData.hostname,
+              ip_addresses: machineData.ip_addresses || machines.value[machineIndex].ip_addresses || [],
+              mac_addresses: extractMacAddresses(machineData) || machines.value[machineIndex].mac_addresses || [],
               interface_set: machineData.interface_set || machines.value[machineIndex].interface_set || []
             }
             // console.log(`✅ Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
@@ -2804,6 +2816,24 @@ export default {
       }
     })
     
+    // Settings의 itemsPerPage 값이 변경되면 반영
+    watch(() => settingsStore.settings.itemsPerPage, (newValue) => {
+      if (newValue) {
+        itemsPerPage.value = newValue
+        // 페이지 변경 시 첫 페이지로 리셋
+        currentPage.value = 1
+      }
+    })
+    
+    // itemsPerPage가 변경되면 Settings에도 반영 (자동 저장)
+    watch(itemsPerPage, (newValue) => {
+      if (newValue && settingsStore.settings.itemsPerPage !== newValue) {
+        settingsStore.settings.itemsPerPage = newValue
+        // Settings에 자동 저장
+        settingsStore.save()
+      }
+    })
+    
     onMounted(() => {
       // 초기 로드는 항상 REST API로
       loadMachines()
@@ -2817,6 +2847,7 @@ export default {
         selectedStatus,
         statusFilters,
         filteredMachines,
+        paginatedMachines,
         selectedMachines,
         selectAll,
         currentPage,

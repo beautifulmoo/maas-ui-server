@@ -1,0 +1,8 @@
+{
+  "maasUrl" : "http://192.168.189.71:5240",
+  "apiKey" : "idwbvWv1cxnNajGSaX:nBFwezD08jUznN0pMA:VcrKMpOquA0C31egWGM07kxDEZTXVAiF",
+  "refreshInterval" : 30,
+  "autoRefresh" : true,
+  "itemsPerPage" : "100",
+  "showAdvancedInfo" : false
+}

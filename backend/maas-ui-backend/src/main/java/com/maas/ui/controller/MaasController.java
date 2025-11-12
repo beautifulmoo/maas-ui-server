@@ -2,6 +2,7 @@ package com.maas.ui.controller;
 
 import com.maas.ui.service.MaasApiService;
 import com.maas.ui.service.MaasAuthService;
+import com.maas.ui.service.SettingsService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +20,42 @@ public class MaasController {
     
     @Autowired
     private MaasAuthService authService;
+    
+    @Autowired
+    private SettingsService settingsService;
+    
+    /**
+     * 설정을 가져옵니다.
+     */
+    @GetMapping("/settings")
+    public ResponseEntity<Map<String, Object>> getSettings() {
+        try {
+            Map<String, Object> settings = settingsService.loadSettings();
+            return ResponseEntity.ok(settings);
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("error", "Failed to load settings: " + e.getMessage()));
+        }
+    }
+    
+    /**
+     * 설정을 저장합니다.
+     */
+    @PostMapping("/settings")
+    public ResponseEntity<Map<String, Object>> saveSettings(@RequestBody Map<String, Object> settings) {
+        try {
+            boolean success = settingsService.saveSettings(settings);
+            if (success) {
+                return ResponseEntity.ok(Map.of("success", true, "message", "Settings saved successfully"));
+            } else {
+                return ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to save settings"));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("success", false, "error", "Failed to save settings: " + e.getMessage()));
+        }
+    }
     
     /**
      * 머신 통계 정보를 가져옵니다.

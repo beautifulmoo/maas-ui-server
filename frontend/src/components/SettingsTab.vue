@@ -20,7 +20,7 @@
           <label for="api-key">API Key:</label>
           <input 
             id="api-key"
-            type="password" 
+            type="text" 
             v-model="settings.apiKey" 
             placeholder="Enter your MAAS API key"
             class="form-input"
@@ -98,6 +98,7 @@
 
 <script>
 import { ref, onMounted } from 'vue'
+import axios from 'axios'
 import { useSettings } from '../composables/useSettings'
 
 export default {
@@ -109,16 +110,17 @@ export default {
     // useSettings composable 사용
     const { settings, save, reset, refresh } = useSettings()
     
-    const saveSettings = () => {
-      if (save()) {
+    const saveSettings = async () => {
+      const success = await save()
+      if (success) {
         showMessage('Settings saved successfully!', 'success')
       } else {
         showMessage('Failed to save settings!', 'error')
       }
     }
     
-    const resetSettings = () => {
-      reset()
+    const resetSettings = async () => {
+      await reset()
       showMessage('Settings reset to defaults!', 'info')
     }
     
@@ -162,9 +164,9 @@ export default {
       }, 5000)
     }
     
-    onMounted(() => {
-      // 설정 새로고침 (localStorage에서 로드)
-      refresh()
+    onMounted(async () => {
+      // 설정 새로고침 (API에서 로드)
+      await refresh()
     })
     
     return {
