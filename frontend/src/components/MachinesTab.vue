@@ -1174,7 +1174,12 @@ export default {
         
         if (response.data && response.data.success) {
           console.log('Machine commissioning aborted successfully:', response.data)
-          // Status will be updated via WebSocket
+          // Update status immediately to 'new' (WebSocket will update later if needed)
+          const machineIndex = machines.value.findIndex(m => m.id === machine.id)
+          if (machineIndex !== -1) {
+            machines.value[machineIndex].status = 'new'
+            machines.value[machineIndex].status_message = ''
+          }
         } else {
           error.value = response.data?.error || 'Failed to abort commissioning'
         }
@@ -1291,7 +1296,12 @@ export default {
         
         if (response.data && response.data.success) {
           console.log('Machine deployment aborted successfully:', response.data)
-          // Status will be updated via WebSocket
+          // Update status immediately to 'ready' (WebSocket will update later if needed)
+          const machineIndex = machines.value.findIndex(m => m.id === machine.id)
+          if (machineIndex !== -1) {
+            machines.value[machineIndex].status = 'ready'
+            machines.value[machineIndex].status_message = ''
+          }
         } else {
           error.value = response.data?.error || 'Failed to abort deployment'
         }
