@@ -404,6 +404,20 @@ public class MaasController {
     }
     
     /**
+     * 머신을 삭제합니다.
+     */
+    @DeleteMapping("/machines/{systemId}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        return maasApiService.deleteMachine(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to delete machine")));
+    }
+    
+    /**
      * 헬스 체크 엔드포인트
      */
     @GetMapping("/health")

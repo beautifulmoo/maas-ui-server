@@ -1,7 +1,115 @@
 <template>
   <div class="machines">
     <div class="header">
-    <h2>Machines</h2>
+      <h2>Machines</h2>
+      
+      <!-- Action Bar (shown when machines are selected) -->
+      <div v-if="!loading && !error && selectedMachines.length > 0" class="action-bar">
+      <div 
+        ref="actionsMenuButton"
+        class="action-bar-item"
+        @click.stop="toggleActionsMenu($event)"
+      >
+        <span class="action-bar-label">Actions</span>
+        <span 
+          class="action-bar-dropdown-icon"
+          :class="{ 'active': openActionsMenu }"
+        >
+          {{ openActionsMenu ? '^' : 'v' }}
+        </span>
+        <Teleport to="body">
+          <div 
+            v-if="openActionsMenu"
+            class="action-bar-dropdown-menu"
+            :style="{
+              top: ((actionsMenuPosition && actionsMenuPosition.top) || 0) + 'px',
+              left: ((actionsMenuPosition && actionsMenuPosition.left) || 0) + 'px'
+            }"
+            @click.stop
+          >
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkAction('commission')"
+              :class="{ 'disabled': !canBulkCommission() }"
+            >
+              Commission...
+            </div>
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkAction('allocate')"
+              :class="{ 'disabled': !canBulkAllocate() }"
+            >
+              Allocate...
+            </div>
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkAction('deploy')"
+              :class="{ 'disabled': !canBulkDeploy() }"
+            >
+              Deploy...
+            </div>
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkAction('release')"
+              :class="{ 'disabled': !canBulkRelease() }"
+            >
+              Release...
+            </div>
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkAction('abort')"
+              :class="{ 'disabled': !canBulkAbort() }"
+            >
+              Abort...
+            </div>
+          </div>
+        </Teleport>
+      </div>
+      <div 
+        ref="powerActionMenuButton"
+        class="action-bar-item"
+        @click.stop="togglePowerActionMenu($event)"
+      >
+        <span class="action-bar-label">Power</span>
+        <span 
+          class="action-bar-dropdown-icon"
+          :class="{ 'active': openPowerActionMenu }"
+        >
+          {{ openPowerActionMenu ? '^' : 'v' }}
+        </span>
+        <Teleport to="body">
+          <div 
+            v-if="openPowerActionMenu"
+            class="action-bar-dropdown-menu"
+            :style="{
+              top: ((powerActionMenuPosition && powerActionMenuPosition.top) || 0) + 'px',
+              left: ((powerActionMenuPosition && powerActionMenuPosition.left) || 0) + 'px'
+            }"
+            @click.stop
+          >
+            <div class="action-bar-dropdown-item disabled">
+              Turn on... (Coming soon)
+            </div>
+            <div class="action-bar-dropdown-item disabled">
+              Turn off... (Coming soon)
+            </div>
+          </div>
+        </Teleport>
+      </div>
+      <div 
+        class="action-bar-item"
+        @click.stop="handleBulkDelete()"
+      >
+        <span class="action-bar-label">Delete</span>
+        <span class="action-bar-icon">
+          🗑️
+        </span>
+      </div>
+      <div class="action-bar-selected-count">
+        {{ selectedMachines.length }} selected
+      </div>
+      </div>
+      
       <div class="connection-status">
         <span :class="['status-indicator', connectionStatus]">
           {{ connectionStatus === 'connected' ? 'Live' : 
@@ -53,7 +161,15 @@
         <thead>
           <tr>
             <th class="checkbox-col">
-              <input type="checkbox" v-model="selectAll" @change="toggleSelectAll">
+              <div class="select-all-container">
+                <input type="checkbox" v-model="selectAll" @change="toggleSelectAll">
+                <span 
+                  class="status-select-dropdown-icon"
+                  @click.stop="toggleStatusSelectMenu($event)"
+                >
+                  ▼
+                </span>
+              </div>
             </th>
             <th class="fqdn-col">FQDN</th>
             <th class="power-col">POWER</th>
@@ -92,9 +208,23 @@
               </div>
             </td>
             <td class="power-col">
-              <span class="power-status">
-                {{ machine.power_state || 'Unknown' }}
-              </span>
+              <div class="power-container" 
+                   @mouseenter="hoveredPowerMachine = machine.id"
+                   @mouseleave="hoveredPowerMachine = null">
+                <span class="power-status">
+                  {{ machine.power_state || 'Unknown' }}
+                </span>
+                <span class="power-type">
+                  {{ machine.power_type || 'Manual' }}
+                </span>
+                <span 
+                  v-if="hoveredPowerMachine === machine.id || openPowerMenu === machine.id"
+                  class="power-dropdown-icon"
+                  @click.stop="togglePowerMenu(machine.id, $event)"
+                >
+                  ▼
+                </span>
+              </div>
             </td>
             <td class="status-col">
               <div class="status-container">
@@ -197,6 +327,65 @@
         </tbody>
       </table>
         </div>
+    
+    <!-- Status Select Dropdown Menu (Teleport outside of v-for) -->
+    <Teleport to="body">
+      <div 
+        v-if="openStatusSelectMenu && statusSelectMenuPosition && statusSelectMenuPosition.top !== undefined"
+        class="status-select-dropdown-menu"
+        :style="{
+          top: ((statusSelectMenuPosition && statusSelectMenuPosition.top) || 0) + 'px',
+          left: ((statusSelectMenuPosition && statusSelectMenuPosition.left) || 0) + 'px'
+        }"
+        @click.stop
+      >
+        <div class="status-select-dropdown-header">SELECT BY STATUS:</div>
+        <div 
+          v-for="status in availableStatusesForSelection" 
+          :key="status"
+          class="status-select-dropdown-item"
+          @click="toggleSelectByStatus(status)"
+        >
+          <input 
+            type="checkbox" 
+            :checked="isStatusSelected(status)"
+            @mousedown.stop.prevent="toggleSelectByStatus(status)"
+            @change.stop.prevent="toggleSelectByStatus(status)"
+            tabindex="0"
+          >
+          <span>{{ getStatusDisplayName(status) }}</span>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Power Dropdown Menu (Teleport outside of v-for) -->
+    <Teleport to="body">
+      <div 
+        v-if="openPowerMenu && powerMenuPosition && powerMenuPosition.top !== undefined"
+        class="power-dropdown-menu"
+        :style="{
+          top: ((powerMenuPosition && powerMenuPosition.top) || 0) + 'px',
+          left: ((powerMenuPosition && powerMenuPosition.left) || 0) + 'px'
+        }"
+        @click.stop
+      >
+        <div class="power-dropdown-header">TAKE ACTION:</div>
+        <div 
+          class="power-dropdown-item"
+          @click="handlePowerAction(getMachineById(openPowerMenu), 'on')"
+        >
+          <span class="power-icon power-on">●</span>
+          <span>Turn on</span>
+        </div>
+        <div 
+          class="power-dropdown-item"
+          @click="handlePowerAction(getMachineById(openPowerMenu), 'off')"
+        >
+          <span class="power-icon power-off">●</span>
+          <span>Turn off</span>
+        </div>
+      </div>
+    </Teleport>
         
     <div v-if="!loading && !error && filteredMachines.length === 0" class="no-machines">
       <p>No machines found matching your criteria.</p>
@@ -498,7 +687,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import axios from 'axios'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useSettings } from '../composables/useSettings'
@@ -515,6 +704,11 @@ export default {
     const selectedMachines = ref([])
     const selectAll = ref(false)
     const currentPage = ref(1)
+    
+    // Status Select Menu
+    const openStatusSelectMenu = ref(false)
+    const statusSelectMenuPosition = ref({ top: 0, left: 0 })
+    const selectedStatusesForSelection = ref([]) // 선택된 상태 목록
     
     // WebSocket 연결
     // ⚠️ 중요: useWebSocket()은 반드시 최상단에서 먼저 호출해야 함
@@ -554,6 +748,74 @@ export default {
     // Release Machine
     const releasingMachines = ref([])
     
+    // Power Menu
+    const hoveredPowerMachine = ref(null)
+    const openPowerMenu = ref(null)
+    const powerMenuPosition = ref({ top: 0, left: 0 })
+    
+    // Action Bar Menu
+    const openActionsMenu = ref(false)
+    const actionsMenuPosition = ref({ top: 0, left: 0 })
+    const openPowerActionMenu = ref(false)
+    const powerActionMenuPosition = ref({ top: 0, left: 0 })
+    const actionsMenuButton = ref(null)
+    const powerActionMenuButton = ref(null)
+    
+    // Power Menu Functions
+    const togglePowerMenu = (machineId, event) => {
+      if (openPowerMenu.value === machineId) {
+        openPowerMenu.value = null
+        powerMenuPosition.value = { top: 0, left: 0 }
+      } else {
+        // 클릭한 버튼의 위치 계산
+        if (event && event.target) {
+          const powerContainer = event.target.closest('.power-container')
+          if (powerContainer) {
+            const buttonRect = powerContainer.getBoundingClientRect()
+            if (buttonRect) {
+              powerMenuPosition.value = {
+                top: buttonRect.bottom + window.scrollY + 4,
+                left: buttonRect.left + window.scrollX
+              }
+              openPowerMenu.value = machineId
+            } else {
+              console.warn('Could not get button position')
+              openPowerMenu.value = null
+            }
+          } else {
+            console.warn('Could not find power-container')
+            openPowerMenu.value = null
+          }
+        } else {
+          console.warn('No event or target provided')
+          openPowerMenu.value = null
+        }
+      }
+    }
+    
+    // 머신 ID로 머신 객체 찾기
+    const getMachineById = (machineId) => {
+      return machines.value.find(m => m.id === machineId) || null
+    }
+    
+    const handlePowerAction = (machine, action) => {
+      if (!machine) {
+        console.warn('Machine not found')
+        openPowerMenu.value = null
+        powerMenuPosition.value = { top: 0, left: 0 }
+        return
+      }
+      console.log(`Power action: ${action} for machine ${machine.id}`)
+      // TODO: API 연결 (나중에 구현)
+      // if (action === 'on') {
+      //   // Turn on API call
+      // } else if (action === 'off') {
+      //   // Turn off API call
+      // }
+      openPowerMenu.value = null
+      powerMenuPosition.value = { top: 0, left: 0 }
+    }
+    
     // Network Modal
     const showNetworkModalState = ref(false)
     const selectedMachine = ref(null)
@@ -565,6 +827,7 @@ export default {
     const availableSubnets = ref([])
     const fabricVlanMap = ref({}) // fabric id -> vlan_id mapping
     const fabricVlanIdsMap = ref({}) // fabric id -> [vlan_id, ...] mapping (fabric에 속한 모든 vlan_id 목록)
+    const globalFabricsMap = ref({}) // fabric id -> fabric name mapping (전역 fabric 목록)
     
     const filteredMachines = computed(() => {
       let filtered = machines.value
@@ -614,6 +877,14 @@ export default {
           const machineIndex = machines.value.findIndex(m => m.id === systemId)
           
           if (machineIndex !== -1) {
+            // MAC 주소 추출
+            const macAddresses = extractMacAddresses(machineData)
+            // MAC 주소로 fabric 찾기
+            const fabricName = findFabricByMacAddress({
+              ...machineData,
+              mac_addresses: macAddresses
+            })
+            
             // 기존 머신 정보를 업데이트 (interface_set 포함)
             machines.value[machineIndex] = {
               ...machines.value[machineIndex],
@@ -621,16 +892,17 @@ export default {
               status: getStatusName(machineData.status_name || machineData.status),
               status_message: machineData.status_message,
               ip_addresses: machineData.ip_addresses || [],
-              mac_addresses: extractMacAddresses(machineData),
+              mac_addresses: macAddresses,
               architecture: machineData.architecture,
               cpu_count: machineData.cpu_count || 0,
               memory: machineData.memory || 0,
               power_state: machineData.power_state,
+              power_type: machineData.power_type || 'Manual',
               owner: machineData.owner,
               tags: machineData.tag_names || [],
               pool: machineData.pool?.name || 'default',
               zone: machineData.zone?.name || 'default',
-              fabric: machineData.fabric?.name || '-',
+              fabric: fabricName,
               interface_set: machineData.interface_set || [] // 네트워크 인터페이스 정보 업데이트
             }
             
@@ -650,12 +922,48 @@ export default {
       }
     }
     
+    // Fabric 목록을 로드하는 함수
+    const loadFabrics = async () => {
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const fabricsResponse = await axios.get('http://localhost:8081/api/fabrics', {
+          params: apiParams
+        })
+        
+        if (fabricsResponse.data && fabricsResponse.data.results) {
+          // fabric id -> fabric name 매핑 저장
+          globalFabricsMap.value = {}
+          fabricsResponse.data.results.forEach(fabric => {
+            const fabricId = fabric.id
+            const fabricName = fabric.name || `fabric-${fabricId}`
+            // 여러 타입의 키로 저장 (타입 불일치 대비)
+            globalFabricsMap.value[fabricId] = fabricName
+            globalFabricsMap.value[String(fabricId)] = fabricName
+            if (typeof fabricId === 'string') {
+              const numId = parseInt(fabricId, 10)
+              if (!isNaN(numId)) {
+                globalFabricsMap.value[numId] = fabricName
+              }
+            } else if (typeof fabricId === 'number') {
+              globalFabricsMap.value[String(fabricId)] = fabricName
+            }
+          })
+          console.log('✅ Global fabrics map loaded:', Object.keys(globalFabricsMap.value).length, 'fabrics')
+        }
+      } catch (err) {
+        console.warn('⚠️ Failed to load fabrics:', err.message)
+      }
+    }
+    
     const loadMachines = async () => {
       loading.value = true
       error.value = null
       
       try {
         console.log('🔄 Loading machines via REST API...')
+        
+        // Fabric 목록 먼저 로드
+        await loadFabrics()
         
         // REST API로 머신 목록 가져오기
         const response = await axios.get('http://localhost:8081/api/machines', {
@@ -664,26 +972,36 @@ export default {
         
         if (response.data && response.data.results) {
           // MAAS API 응답을 우리 UI 형식으로 변환
-          machines.value = response.data.results.map(machine => ({
-            id: machine.system_id,
-            hostname: machine.hostname,
-            status: getStatusName(machine.status_name || machine.status),
-            status_message: machine.status_message,
-            ip_addresses: machine.ip_addresses || [],
-            mac_addresses: extractMacAddresses(machine),
-            architecture: machine.architecture,
-            cpu_count: machine.cpu_count || 0,
-            memory: machine.memory || 0,
-            disk_count: machine.blockdevice_set?.length || 0,
-            storage: calculateStorage(machine.blockdevice_set),
-            power_state: machine.power_state,
-            owner: machine.owner,
-            tags: machine.tag_names || [],
-            pool: machine.pool?.name || 'default',
-            zone: machine.zone?.name || 'default',
-            fabric: machine.fabric?.name || '-',
-            interface_set: machine.interface_set || [] // 네트워크 인터페이스 정보 저장
-          }))
+          machines.value = response.data.results.map(machine => {
+            const macAddresses = extractMacAddresses(machine)
+            // MAC 주소로 fabric 찾기
+            const fabricName = findFabricByMacAddress({
+              ...machine,
+              mac_addresses: macAddresses
+            })
+            
+            return {
+              id: machine.system_id,
+              hostname: machine.hostname,
+              status: getStatusName(machine.status_name || machine.status),
+              status_message: machine.status_message,
+              ip_addresses: machine.ip_addresses || [],
+              mac_addresses: macAddresses,
+              architecture: machine.architecture,
+              cpu_count: machine.cpu_count || 0,
+              memory: machine.memory || 0,
+              disk_count: machine.blockdevice_set?.length || 0,
+              storage: calculateStorage(machine.blockdevice_set),
+              power_state: machine.power_state,
+              power_type: machine.power_type || 'Manual',
+              owner: machine.owner,
+              tags: machine.tag_names || [],
+              pool: machine.pool?.name || 'default',
+              zone: machine.zone?.name || 'default',
+              fabric: fabricName,
+              interface_set: machine.interface_set || [] // 네트워크 인터페이스 정보 저장
+            }
+          })
           console.log(`✅ Loaded ${machines.value.length} machines via REST API`)
           
           // 각 머신의 상세 정보를 가져와서 blockdevice_set 정보 업데이트
@@ -834,6 +1152,41 @@ export default {
       return macAddresses.length > 0 ? macAddresses : []
     }
     
+    // MAC 주소로 fabric 이름을 찾는 함수
+    const findFabricByMacAddress = (machine) => {
+      if (!machine || !machine.interface_set || !Array.isArray(machine.interface_set)) {
+        return '-'
+      }
+      
+      // 머신의 첫 번째 MAC 주소 찾기
+      const firstMac = machine.mac_addresses?.[0]
+      if (!firstMac) {
+        return '-'
+      }
+      
+      // interface_set에서 해당 MAC 주소를 가진 인터페이스 찾기
+      const matchingInterface = machine.interface_set.find(iface => {
+        return iface.mac_address && iface.mac_address.toLowerCase() === firstMac.toLowerCase()
+      })
+      
+      if (!matchingInterface || !matchingInterface.vlan) {
+        return '-'
+      }
+      
+      // 인터페이스의 vlan에서 fabric_id 가져오기
+      const fabricId = matchingInterface.vlan.fabric_id
+      if (fabricId === null || fabricId === undefined || fabricId === '') {
+        return '-'
+      }
+      
+      // globalFabricsMap에서 fabric 이름 찾기
+      const fabricName = globalFabricsMap.value[fabricId] || 
+                         globalFabricsMap.value[String(fabricId)] || 
+                         globalFabricsMap.value[Number(fabricId)]
+      
+      return fabricName || '-'
+    }
+    
     const getStatusText = (status) => {
       const statusMap = {
         'new': 'New',
@@ -869,13 +1222,131 @@ export default {
       return normalizedStatus.endsWith('ing') || normalizedStatus.endsWith('erasing')
     }
     
+    // 멈춰 있는 상태 목록 (진행 중 상태 제외)
+    const availableStatusesForSelection = computed(() => {
+      const allStatuses = new Set()
+      filteredMachines.value.forEach(machine => {
+        const status = machine.status?.toLowerCase() || ''
+        if (status && !isStatusInProgress(status)) {
+          allStatuses.add(status)
+        }
+      })
+      // 상태를 정렬하여 반환
+      return Array.from(allStatuses).sort()
+    })
+    
+    // 상태의 표시 이름 반환
+    const getStatusDisplayName = (status) => {
+      const statusMap = {
+        'new': 'New',
+        'ready': 'Ready',
+        'allocated': 'Allocated',
+        'deployed': 'Deployed',
+        'failed': 'Failed',
+        'failed commissioning': 'Failed Commissioning',
+        'failed deployment': 'Failed Deployment',
+        'failed disk erasing': 'Failed Disk Erasing',
+        'reserved': 'Reserved',
+        'retired': 'Retired',
+        'broken': 'Broken'
+      }
+      return statusMap[status.toLowerCase()] || status.charAt(0).toUpperCase() + status.slice(1)
+    }
+    
+    // 특정 상태가 선택되어 있는지 확인
+    const isStatusSelected = (status) => {
+      return selectedStatusesForSelection.value.includes(status)
+    }
+    
+    // selectAll 상태 업데이트
+    const updateSelectAllState = () => {
+      if (filteredMachines.value.length === 0) {
+        selectAll.value = false
+        return
+      }
+      const allSelected = filteredMachines.value.every(m => selectedMachines.value.includes(m.id))
+      selectAll.value = allSelected
+    }
+    
+    // 상태별 선택 토글
+    const toggleSelectByStatus = (status) => {
+      const index = selectedStatusesForSelection.value.indexOf(status)
+      if (index > -1) {
+        // 이미 선택된 상태면 해제
+        selectedStatusesForSelection.value.splice(index, 1)
+        // 해당 상태의 머신들 선택 해제
+        const machinesToDeselect = filteredMachines.value
+          .filter(m => (m.status?.toLowerCase() || '') === status)
+          .map(m => m.id)
+        selectedMachines.value = selectedMachines.value.filter(id => !machinesToDeselect.includes(id))
+      } else {
+        // 선택되지 않은 상태면 선택
+        selectedStatusesForSelection.value.push(status)
+        // 해당 상태의 머신들 선택
+        const machinesToSelect = filteredMachines.value
+          .filter(m => (m.status?.toLowerCase() || '') === status)
+          .map(m => m.id)
+        // 중복 제거하여 추가
+        machinesToSelect.forEach(id => {
+          if (!selectedMachines.value.includes(id)) {
+            selectedMachines.value.push(id)
+          }
+        })
+      }
+      // selectAll 상태 업데이트
+      updateSelectAllState()
+    }
+    
+    // Status Select Menu 토글
+    const toggleStatusSelectMenu = (event) => {
+      if (openStatusSelectMenu.value) {
+        openStatusSelectMenu.value = false
+        statusSelectMenuPosition.value = { top: 0, left: 0 }
+      } else {
+        if (event && event.target) {
+          const selectAllContainer = event.target.closest('.select-all-container')
+          if (selectAllContainer) {
+            const containerRect = selectAllContainer.getBoundingClientRect()
+            if (containerRect) {
+              statusSelectMenuPosition.value = {
+                top: containerRect.bottom + window.scrollY + 4,
+                left: containerRect.left + window.scrollX
+              }
+              openStatusSelectMenu.value = true
+            } else {
+              console.warn('Could not get select all container position')
+              openStatusSelectMenu.value = false
+            }
+          } else {
+            console.warn('Could not find select-all-container')
+            openStatusSelectMenu.value = false
+          }
+        } else {
+          console.warn('No event or target provided')
+          openStatusSelectMenu.value = false
+        }
+      }
+    }
+    
     const toggleSelectAll = () => {
       if (selectAll.value) {
         selectedMachines.value = filteredMachines.value.map(m => m.id)
+        // 모든 멈춰 있는 상태를 선택된 상태 목록에 추가
+        availableStatusesForSelection.value.forEach(status => {
+          if (!selectedStatusesForSelection.value.includes(status)) {
+            selectedStatusesForSelection.value.push(status)
+          }
+        })
       } else {
         selectedMachines.value = []
+        selectedStatusesForSelection.value = []
       }
     }
+    
+    // selectedMachines 변경 시 selectAll 상태 업데이트
+    watch(selectedMachines, () => {
+      updateSelectAllState()
+    }, { deep: true })
     
     const viewDetails = (machine) => {
       console.log('View details for machine:', machine)
@@ -1316,6 +1787,297 @@ export default {
           abortingDeployMachines.value.splice(index, 1)
         }
       }
+    }
+    
+    // 통합 Abort 함수 (Commissioning과 Deploying 모두 처리)
+    const abortMachine = async (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      if (status === 'commissioning') {
+        await abortCommissioning(machine)
+      } else if (status === 'deploying') {
+        await abortDeploy(machine)
+      }
+    }
+    
+    // Action Bar Functions
+    const toggleActionsMenu = (event) => {
+      console.log('toggleActionsMenu called', { event, currentState: openActionsMenu.value, buttonRef: actionsMenuButton.value })
+      
+      if (openActionsMenu.value) {
+        openActionsMenu.value = false
+        actionsMenuPosition.value = { top: 0, left: 0 }
+      } else {
+        // Power Action 메뉴가 열려있으면 닫기
+        if (openPowerActionMenu.value) {
+          openPowerActionMenu.value = false
+          powerActionMenuPosition.value = { top: 0, left: 0 }
+        }
+        
+        // nextTick을 사용하여 DOM이 완전히 렌더링된 후 위치 계산
+        nextTick(() => {
+          // ref를 사용하여 요소 찾기
+          const targetElement = actionsMenuButton.value || 
+                                (event && event.currentTarget) || 
+                                (event && event.target && event.target.closest('.action-bar-item'))
+          
+          console.log('Target element found:', targetElement)
+          
+          if (targetElement) {
+            const containerRect = targetElement.getBoundingClientRect()
+            console.log('Container rect:', containerRect, 'window.scrollY:', window.scrollY, 'window.scrollX:', window.scrollX)
+            
+            if (containerRect && containerRect.width > 0 && containerRect.height > 0) {
+              // position: fixed를 사용하므로 viewport 기준 좌표 사용 (스크롤 오프셋 없음)
+              actionsMenuPosition.value = {
+                top: containerRect.bottom + 4,
+                left: containerRect.left
+              }
+              console.log('Menu position set:', actionsMenuPosition.value)
+              // 위치 설정 후 메뉴 열기
+              openActionsMenu.value = true
+            } else {
+              console.warn('Invalid container rect:', containerRect)
+              openActionsMenu.value = false
+            }
+          } else {
+            console.warn('Could not find action-bar-item')
+            openActionsMenu.value = false
+          }
+        })
+      }
+    }
+    
+    const togglePowerActionMenu = (event) => {
+      if (openPowerActionMenu.value) {
+        openPowerActionMenu.value = false
+        powerActionMenuPosition.value = { top: 0, left: 0 }
+      } else {
+        // Actions 메뉴가 열려있으면 닫기
+        if (openActionsMenu.value) {
+          openActionsMenu.value = false
+          actionsMenuPosition.value = { top: 0, left: 0 }
+        }
+        
+        // nextTick을 사용하여 DOM이 완전히 렌더링된 후 위치 계산
+        nextTick(() => {
+          // ref를 사용하여 요소 찾기
+          const targetElement = powerActionMenuButton.value || 
+                                (event && event.currentTarget) || 
+                                (event && event.target && event.target.closest('.action-bar-item'))
+          
+          if (targetElement) {
+            const containerRect = targetElement.getBoundingClientRect()
+            
+            if (containerRect && containerRect.width > 0 && containerRect.height > 0) {
+              // position: fixed를 사용하므로 viewport 기준 좌표 사용 (스크롤 오프셋 없음)
+              powerActionMenuPosition.value = {
+                top: containerRect.bottom + 4,
+                left: containerRect.left
+              }
+              // 위치 설정 후 메뉴 열기
+              openPowerActionMenu.value = true
+            } else {
+              console.warn('Invalid container rect:', containerRect)
+              openPowerActionMenu.value = false
+            }
+          } else {
+            console.warn('Could not find power action-bar-item')
+            openPowerActionMenu.value = false
+          }
+        })
+      }
+    }
+    
+    // 선택된 머신들 가져오기
+    const getSelectedMachines = () => {
+      return machines.value.filter(m => selectedMachines.value.includes(m.id))
+    }
+    
+    // 일괄 작업 가능 여부 확인 함수들
+    const canBulkCommission = () => {
+      const selected = getSelectedMachines()
+      return selected.some(m => canCommission(m))
+    }
+    
+    const canBulkAllocate = () => {
+      // Allocate는 항상 false (API 미구현)
+      return false
+    }
+    
+    const canBulkDeploy = () => {
+      const selected = getSelectedMachines()
+      return selected.some(m => {
+        const status = m.status?.toLowerCase() || ''
+        return status === 'ready' || status === 'allocated'
+      })
+    }
+    
+    const canBulkRelease = () => {
+      const selected = getSelectedMachines()
+      return selected.some(m => {
+        const status = m.status?.toLowerCase() || ''
+        return status === 'failed deployment' || status === 'failed disk erasing'
+      })
+    }
+    
+    const canBulkAbort = () => {
+      const selected = getSelectedMachines()
+      return selected.some(m => {
+        const status = m.status?.toLowerCase() || ''
+        return status === 'commissioning' || status === 'deploying'
+      })
+    }
+    
+    // 일괄 작업 핸들러
+    const handleBulkAction = async (action) => {
+      openActionsMenu.value = false
+      const selected = getSelectedMachines()
+      
+      if (selected.length === 0) {
+        return
+      }
+      
+      // 확인 메시지
+      let confirmMessage = ''
+      switch (action) {
+        case 'commission':
+          confirmMessage = `선택된 ${selected.length}개의 머신을 Commissioning 하시겠습니까?`
+          break
+        case 'allocate':
+          confirmMessage = `선택된 ${selected.length}개의 머신을 Allocate 하시겠습니까?`
+          break
+        case 'deploy':
+          confirmMessage = `선택된 ${selected.length}개의 머신을 Deploy 하시겠습니까?`
+          break
+        case 'release':
+          confirmMessage = `선택된 ${selected.length}개의 머신을 Release 하시겠습니까?`
+          break
+        case 'abort':
+          confirmMessage = `선택된 ${selected.length}개의 머신의 작업을 Abort 하시겠습니까?`
+          break
+      }
+      
+      if (!window.confirm(confirmMessage)) {
+        return
+      }
+      
+      // 각 머신에 대해 작업 수행
+      for (const machine of selected) {
+        try {
+          switch (action) {
+            case 'commission':
+              if (canCommission(machine)) {
+                await commissionMachine(machine)
+              }
+              break
+            case 'allocate':
+              // Allocate는 API 미구현이므로 아무것도 하지 않음
+              console.log('Allocate is not implemented yet')
+              break
+            case 'deploy':
+              const deployStatus = machine.status?.toLowerCase() || ''
+              if (deployStatus === 'ready' || deployStatus === 'allocated') {
+                await deployMachine(machine)
+              }
+              break
+            case 'release':
+              const releaseStatus = machine.status?.toLowerCase() || ''
+              if (releaseStatus === 'failed deployment' || releaseStatus === 'failed disk erasing') {
+                await releaseMachine(machine)
+              }
+              break
+            case 'abort':
+              await abortMachine(machine)
+              break
+          }
+        } catch (err) {
+          console.error(`Error performing ${action} on machine ${machine.id}:`, err)
+        }
+      }
+    }
+    
+    const handleBulkDelete = async () => {
+      console.log('handleBulkDelete called')
+      const selected = getSelectedMachines()
+      console.log('Selected machines:', selected)
+      
+      if (selected.length === 0) {
+        console.warn('No machines selected for deletion')
+        alert('삭제할 머신을 선택해주세요.')
+        return
+      }
+      
+      const confirmMessage = `선택된 ${selected.length}개의 머신을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+      if (!window.confirm(confirmMessage)) {
+        console.log('Delete cancelled by user')
+        return
+      }
+      
+      console.log('Starting deletion of', selected.length, 'machine(s)')
+      
+      const apiParams = settingsStore.getApiParams.value
+      const deletePromises = selected.map(async (machine) => {
+        try {
+          const response = await axios.delete(`http://localhost:8081/api/machines/${machine.id}`, {
+            params: {
+              maasUrl: apiParams.maasUrl,
+              apiKey: apiParams.apiKey
+            }
+          })
+          
+          console.log(`Delete response for machine ${machine.id}:`, response.status, response.data)
+          
+          // HTTP 상태 코드가 2xx이고, 응답 데이터가 있으면 success 확인
+          if (response.status >= 200 && response.status < 300) {
+            if (response.data && response.data.success !== false) {
+              console.log(`Machine ${machine.id} deleted successfully:`, response.data)
+              return { success: true, machineId: machine.id }
+            } else if (response.data && response.data.success === false) {
+              console.error(`Failed to delete machine ${machine.id}:`, response.data?.error)
+              return { success: false, machineId: machine.id, error: response.data?.error || 'Unknown error' }
+            } else {
+              // 응답 본문이 없거나 success 필드가 없어도 2xx 상태 코드면 성공으로 간주
+              console.log(`Machine ${machine.id} deleted successfully (no response body)`)
+              return { success: true, machineId: machine.id }
+            }
+          } else {
+            console.error(`Failed to delete machine ${machine.id}: HTTP ${response.status}`)
+            return { success: false, machineId: machine.id, error: `HTTP ${response.status}` }
+          }
+        } catch (err) {
+          console.error(`Error deleting machine ${machine.id}:`, err)
+          // HTTP 상태 코드가 2xx인 경우에도 성공으로 간주 (DELETE는 응답 본문이 없을 수 있음)
+          if (err.response && err.response.status >= 200 && err.response.status < 300) {
+            console.log(`Machine ${machine.id} deleted successfully (status code: ${err.response.status})`)
+            return { success: true, machineId: machine.id }
+          }
+          return { 
+            success: false, 
+            machineId: machine.id, 
+            error: err.response?.data?.error || err.message || 'Failed to delete machine' 
+          }
+        }
+      })
+      
+      const results = await Promise.all(deletePromises)
+      const successCount = results.filter(r => r.success).length
+      const failCount = results.filter(r => !r.success).length
+      
+      if (failCount > 0) {
+        const failedMachines = results.filter(r => !r.success)
+        const errorMessages = failedMachines.map(r => `Machine ${r.machineId}: ${r.error}`).join('\n')
+        alert(`일부 머신 삭제 실패 (${successCount}/${selected.length} 성공):\n${errorMessages}`)
+      } else {
+        console.log(`Successfully deleted ${successCount} machine(s)`)
+      }
+      
+      // 삭제 후 잠시 대기 후 머신 목록 다시 로드 (서버 처리 시간 고려)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await loadMachines()
+      
+      // 선택 해제
+      selectedMachines.value = []
     }
     
     // Deploy Machine
@@ -2782,14 +3544,24 @@ export default {
               refreshMachineDetails(machineData.system_id)
             }
             
+            // MAC 주소 추출 및 fabric 찾기
+            const macAddresses = extractMacAddresses(machineData) || machines.value[machineIndex].mac_addresses || []
+            const fabricName = findFabricByMacAddress({
+              ...machineData,
+              mac_addresses: macAddresses,
+              interface_set: machineData.interface_set || machines.value[machineIndex].interface_set || []
+            })
+            
             machines.value[machineIndex] = {
               ...machines.value[machineIndex],
               status: newStatus,
               status_message: machineData.status_message,
               power_state: machineData.power_state,
+              power_type: machineData.power_type || machines.value[machineIndex].power_type || 'Manual',
               hostname: machineData.hostname,
               ip_addresses: machineData.ip_addresses || machines.value[machineIndex].ip_addresses || [],
-              mac_addresses: extractMacAddresses(machineData) || machines.value[machineIndex].mac_addresses || [],
+              mac_addresses: macAddresses,
+              fabric: fabricName,
               interface_set: machineData.interface_set || machines.value[machineIndex].interface_set || []
             }
             // console.log(`✅ Machine updated: ${machineData.system_id}, Status: ${oldStatus} → ${newStatus}`)
@@ -2797,24 +3569,32 @@ export default {
             // console.log(`❌ [WebSocket Debug] Machine not found in list: ${machineData.system_id}`)
           }
         } else if (newMessage.action === 'create') {
+          // MAC 주소 추출 및 fabric 찾기
+          const macAddresses = extractMacAddresses(machineData)
+          const fabricName = findFabricByMacAddress({
+            ...machineData,
+            mac_addresses: macAddresses
+          })
+          
           const newMachine = {
             id: machineData.system_id,
             hostname: machineData.hostname,
             status: getStatusName(machineData.status_name || machineData.status),
             status_message: machineData.status_message,
             ip_addresses: machineData.ip_addresses || [],
-            mac_addresses: extractMacAddresses(machineData),
+            mac_addresses: macAddresses,
             architecture: machineData.architecture,
             cpu_count: machineData.cpu_count || 0,
             memory: machineData.memory || 0,
             disk_count: machineData.blockdevice_set?.length || 0,
             storage: calculateStorage(machineData.blockdevice_set),
             power_state: machineData.power_state,
+            power_type: machineData.power_type || 'Manual',
             owner: machineData.owner,
             tags: machineData.tag_names || [],
             pool: machineData.pool?.name || 'default',
             zone: machineData.zone?.name || 'default',
-            fabric: machineData.fabric?.name || '-',
+            fabric: fabricName,
             interface_set: machineData.interface_set || []
           }
           machines.value.unshift(newMachine)
@@ -2844,9 +3624,29 @@ export default {
       }
     })
     
+    // 외부 클릭 시 Power 메뉴 및 Status Select 메뉴 닫기
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.power-container') && !event.target.closest('.power-dropdown-menu')) {
+        openPowerMenu.value = null
+        powerMenuPosition.value = { top: 0, left: 0 }
+      }
+      if (!event.target.closest('.select-all-container') && !event.target.closest('.status-select-dropdown-menu')) {
+        openStatusSelectMenu.value = false
+        statusSelectMenuPosition.value = { top: 0, left: 0 }
+      }
+    }
+    
     onMounted(() => {
       // 초기 로드는 항상 REST API로
       loadMachines()
+      
+      // 외부 클릭 이벤트 리스너 추가
+      document.addEventListener('click', handleClickOutside)
+    })
+    
+    onUnmounted(() => {
+      // 외부 클릭 이벤트 리스너 제거
+      document.removeEventListener('click', handleClickOutside)
     })
     
       return {
@@ -2869,6 +3669,15 @@ export default {
         getStatusText,
         isStatusInProgress,
         toggleSelectAll,
+        // Status Select Menu
+        openStatusSelectMenu,
+        statusSelectMenuPosition,
+        availableStatusesForSelection,
+        selectedStatusesForSelection,
+        isStatusSelected,
+        toggleSelectByStatus,
+        toggleStatusSelectMenu,
+        getStatusDisplayName,
         // Add Machine Modal
         showAddModal,
         addingMachine,
@@ -2897,6 +3706,30 @@ export default {
         handleDeployButtonClick,
         abortDeploy,
         deployMachine,
+        // Power Menu
+        hoveredPowerMachine,
+        openPowerMenu,
+        powerMenuPosition,
+        togglePowerMenu,
+        handlePowerAction,
+        getMachineById,
+        // Action Bar
+        openActionsMenu,
+        openPowerActionMenu,
+        actionsMenuPosition,
+        powerActionMenuPosition,
+        actionsMenuButton,
+        powerActionMenuButton,
+        toggleActionsMenu,
+        togglePowerActionMenu,
+        handleBulkAction,
+        handleBulkDelete,
+        canBulkCommission,
+        canBulkAllocate,
+        canBulkDeploy,
+        canBulkRelease,
+        canBulkAbort,
+        abortMachine,
         // Network Modal
         showNetworkModalState,
         selectedMachine,
@@ -2935,18 +3768,25 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: nowrap;
+  min-height: 48px; /* 액션 바가 나타날 때를 고려한 최소 높이 */
+  height: auto;
 }
 
 .machines h2 {
   margin: 0;
   color: #2c3e50;
   font-size: 1.8rem;
+  flex: 0 0 auto;
 }
 
 .connection-status {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .status-indicator {
@@ -3035,6 +3875,100 @@ export default {
   border-color: #007bff;
 }
 
+/* Action Bar Styles */
+.action-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border: 1px solid #dee2e6;
+  flex: 0 0 auto;
+  margin-left: auto;
+  margin-right: 1rem; /* LIVE와의 간격 */
+  height: fit-content;
+  max-height: 48px; /* 헤더 최소 높이와 맞춤 */
+}
+
+.action-bar-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.action-bar-item:hover {
+  background-color: #f8f9fa;
+}
+
+.action-bar-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #212529;
+}
+
+.action-bar-dropdown-icon {
+  font-size: 0.7rem;
+  color: #6c757d;
+  user-select: none;
+  transition: color 0.15s;
+  width: 0.7rem;
+  text-align: center;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.action-bar-dropdown-icon.active {
+  color: #495057;
+}
+
+.action-bar-icon {
+  font-size: 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.action-bar-selected-count {
+  margin-left: auto;
+  font-size: 0.875rem;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+.action-bar-dropdown-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  min-width: 180px;
+}
+
+.action-bar-dropdown-item {
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  color: #212529;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.action-bar-dropdown-item:hover:not(.disabled) {
+  background-color: #f8f9fa;
+}
+
+.action-bar-dropdown-item.disabled {
+  color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .machines-table-container {
   background: white;
   border-radius: 8px;
@@ -3078,17 +4012,21 @@ export default {
 
 .checkbox-col {
   width: 30px;
-  text-align: center;
+  text-align: left;
+  padding-left: 8px;
+  padding-right: 0px;
 }
 
 .fqdn-col {
   width: 80px !important; /* 확실히 작게 */
   min-width: 80px;
   max-width: 80px;
+  padding-left: 0px;
 }
 
 .power-col {
-  width: 60px; /* 조금 줄임 */
+  width: 100px; /* 드롭다운 메뉴를 위한 공간 확보 */
+  position: relative;
 }
 
 .status-col {
@@ -3170,9 +4108,149 @@ export default {
   text-overflow: ellipsis;
 }
 
+.power-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .power-status {
   font-size: 0.75rem;
   color: #495057;
+}
+
+.power-type {
+  font-size: 0.7rem;
+  color: #6c757d;
+}
+
+.power-dropdown-icon {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-size: 0.6rem;
+  color: #6c757d;
+  cursor: pointer;
+  padding: 2px 4px;
+  user-select: none;
+}
+
+.power-dropdown-icon:hover {
+  color: #495057;
+}
+
+.power-dropdown-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  min-width: 150px;
+}
+
+.power-dropdown-header {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #495057;
+  border-bottom: 1px solid #dee2e6;
+  background-color: #f8f9fa;
+}
+
+.power-dropdown-item {
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  color: #212529;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.15s;
+}
+
+.power-dropdown-item:hover {
+  background-color: #f8f9fa;
+}
+
+.power-icon {
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.power-icon.power-on {
+  color: #28a745;
+}
+
+.power-icon.power-off {
+  color: #212529;
+}
+
+.select-all-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+}
+
+.checkbox-col input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.status-select-dropdown-icon {
+  font-size: 0.6rem;
+  color: #6c757d;
+  cursor: pointer;
+  padding: 2px 4px;
+  user-select: none;
+}
+
+.status-select-dropdown-icon:hover {
+  color: #495057;
+}
+
+.status-select-dropdown-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.status-select-dropdown-header {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #495057;
+  border-bottom: 1px solid #dee2e6;
+  background-color: #f8f9fa;
+}
+
+.status-select-dropdown-item {
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  color: #212529;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.15s;
+}
+
+.status-select-dropdown-item:hover {
+  background-color: #f8f9fa;
+}
+
+.status-select-dropdown-item input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
 }
 
 .status-badge {

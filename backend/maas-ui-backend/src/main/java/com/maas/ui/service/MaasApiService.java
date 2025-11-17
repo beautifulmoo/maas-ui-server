@@ -998,4 +998,74 @@ public class MaasApiService {
                     return Mono.just(errorResult);
                 });
     }
+    
+    /**
+     * MAAS 서버에서 머신을 삭제합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return 삭제 결과
+     */
+    public Mono<Map<String, Object>> deleteMachine(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/";
+        
+        System.out.println("Delete Machine - URL: " + url);
+        System.out.println("Delete Machine - systemId: " + systemId);
+        
+        return webClient.delete()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .defaultIfEmpty("")
+                            .flatMap(errorBody -> {
+                                System.out.println("Delete Machine API Error Response: " + errorBody);
+                                try {
+                                    if (errorBody != null && !errorBody.isEmpty()) {
+                                        JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                        String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                        return Mono.error(new RuntimeException(errorMessage));
+                                    } else {
+                                        return Mono.error(new RuntimeException("Delete failed with status: " + response.statusCode()));
+                                    }
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody != null && !errorBody.isEmpty() ? errorBody : "Delete failed"));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .defaultIfEmpty("")
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    System.out.println("Delete Machine API Response: " + (responseBody != null && !responseBody.isEmpty() ? responseBody.substring(0, Math.min(500, responseBody.length())) : "empty or no content"));
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    if (responseBody != null && !responseBody.isEmpty()) {
+                        try {
+                            JsonNode jsonNode = objectMapper.readTree(responseBody);
+                            result.put("data", jsonNode);
+                        } catch (Exception e) {
+                            result.put("message", responseBody);
+                        }
+                    } else {
+                        result.put("message", "Machine deleted successfully");
+                    }
+                    return result;
+                })
+                .onErrorResume(throwable -> {
+                    System.out.println("Delete Machine API Error: " + throwable.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    String errorMessage = throwable.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + throwable.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", errorMessage);
+                    return Mono.just(errorResult);
+                });
+    }
 }

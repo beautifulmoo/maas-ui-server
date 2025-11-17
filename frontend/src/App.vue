@@ -93,7 +93,7 @@ body {
 .main-content {
   padding: 2rem;
   max-width: none;
-  width: 90%;
+  width: 95%;
   margin: 0 auto;
 }
 

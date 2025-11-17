@@ -217,9 +217,10 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 상태 필터 (All, New, Commissioning, Ready, Allocated, Deployed, Failed)
   - 페이지 번호
 - **출력**: 머신 목록 테이블
-  - FQDN, Power State, Status, Owner/Tags, Pool, Zone, Fabric
+  - FQDN, Power State/Power Type, Status, Owner/Tags, Pool, Zone, Fabric
   - CPU Cores, RAM, Disk Count, Storage
   - 액션 버튼 (Commission, Network, Deploy)
+  - Power Action (Turn on, Turn off) - 드롭다운 메뉴
 - **주요 코드 파일**:
   - `MachinesTab.vue`: 메인 컴포넌트
   - `MaasController.getAllMachines()`: API 엔드포인트
@@ -235,6 +236,119 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **에러 처리**:
   - API 호출 실패 시 에러 메시지 표시
   - 빈 결과 처리
+
+#### 기능명: 상태별 머신 선택 (Status-based Machine Selection)
+- **설명**: 머신 테이블의 전체 선택 체크박스 옆에 드롭다운 메뉴를 제공하여, 머신 상태별로 일괄 선택/해제 기능을 제공합니다. 진행 중인 상태(Commissioning, Deploying, Disk Erasing 등)는 제외하고, 멈춰 있는 상태(New, Ready, Allocated, Deployed, Failed 등)만 선택 가능합니다.
+- **입력**: 
+  - 전체 선택 체크박스 옆 드롭다운 아이콘(▼) 클릭
+  - 드롭다운 메뉴에서 상태별 체크박스 선택/해제
+- **출력**: 
+  - 선택된 상태에 해당하는 모든 머신이 자동으로 선택됨
+  - 드롭다운 메뉴의 체크박스 상태 업데이트
+  - 머신 테이블의 개별 체크박스 상태 업데이트
+- **주요 코드 파일**:
+  - `MachinesTab.vue`: 
+    - `availableStatusesForSelection`: 멈춰 있는 상태 목록 계산 (computed)
+    - `selectedStatusesForSelection`: 선택된 상태 목록 (ref)
+    - `toggleSelectByStatus()`: 상태별 선택 토글 함수
+    - `toggleStatusSelectMenu()`: 드롭다운 메뉴 열기/닫기
+    - `isStatusSelected()`: 특정 상태 선택 여부 확인
+    - `getStatusDisplayName()`: 상태 표시 이름 변환
+    - `isStatusInProgress()`: 진행 중 상태 판별 함수
+- **내부 로직 흐름**:
+  1. 전체 선택 체크박스 옆 드롭다운 아이콘(▼)이 항상 표시됨
+  2. 드롭다운 아이콘 클릭 시 상태 선택 메뉴 표시
+  3. `availableStatusesForSelection` computed 속성이 현재 필터링된 머신 목록에서 진행 중 상태를 제외한 모든 상태를 추출
+  4. 드롭다운 메뉴에 각 상태가 체크박스와 함께 표시됨
+  5. 사용자가 상태 체크박스 또는 텍스트 클릭 시:
+     - `toggleSelectByStatus()` 함수 호출
+     - 선택된 상태 목록(`selectedStatusesForSelection`) 업데이트
+     - 해당 상태를 가진 모든 머신의 ID를 `selectedMachines`에 추가/제거
+     - `updateSelectAllState()` 호출하여 전체 선택 체크박스 상태 업데이트
+  6. 전체 선택 체크박스 클릭 시:
+     - 모든 머신 선택/해제
+     - 모든 멈춰 있는 상태를 선택된 상태 목록에 추가/제거
+- **상태 필터링 규칙**:
+  - **포함되는 상태**: New, Ready, Allocated, Deployed, Failed, Reserved, Retired, Broken 등 (진행 중이 아닌 모든 상태)
+  - **제외되는 상태**: Commissioning, Deploying, Disk Erasing, Releasing 등 (진행 중인 상태, "ing" 또는 "erasing"으로 끝나는 상태)
+- **UI/UX 특징**:
+  - 드롭다운 아이콘은 항상 표시되어 레이아웃 흔들림 방지
+  - 드롭다운 메뉴는 Power 드롭다운과 동일한 스타일 적용
+  - 체크박스 클릭 시에도 동작 (mousedown 이벤트 사용)
+  - 상태 텍스트 클릭 시에도 동작
+  - 선택된 상태는 체크박스에 체크 표시
+  - 외부 클릭 시 드롭다운 메뉴 자동 닫힘
+- **에러 처리**:
+  - 상태 목록이 비어있는 경우 빈 드롭다운 표시
+  - 머신 목록이 변경되어도 선택된 상태 목록 유지
+
+#### 기능명: 일괄 머신 액션 (Bulk Machine Actions)
+- **설명**: 선택된 머신들에 대해 일괄로 액션을 수행할 수 있는 액션 바를 제공합니다. 머신을 하나 이상 선택하면 화면 상단 헤더 영역에 액션 바가 나타나며, 여러 머신에 대해 동시에 작업을 수행할 수 있습니다.
+- **입력**: 
+  - 머신 체크박스 선택 (하나 이상)
+  - 액션 바의 Actions 드롭다운 메뉴에서 액션 선택
+  - 액션 바의 Power 드롭다운 메뉴에서 전원 액션 선택 (예정)
+  - 액션 바의 Delete 버튼 클릭
+- **출력**: 
+  - 선택된 머신 수 표시 ("X selected")
+  - 액션 수행 결과 (성공/실패 메시지)
+  - 머신 목록 자동 새로고침
+- **주요 코드 파일**:
+  - `MachinesTab.vue`:
+    - `action-bar`: 액션 바 컴포넌트 (v-if="selectedMachines.length > 0")
+    - `toggleActionsMenu()`: Actions 드롭다운 메뉴 열기/닫기
+    - `togglePowerActionMenu()`: Power 드롭다운 메뉴 열기/닫기
+    - `handleBulkAction()`: 일괄 액션 핸들러 (Commission, Allocate, Deploy, Release, Abort)
+    - `handleBulkDelete()`: 일괄 삭제 핸들러
+    - `canBulkCommission()`, `canBulkDeploy()`, `canBulkRelease()`, `canBulkAbort()`: 액션 가능 여부 확인 함수
+    - `getSelectedMachines()`: 선택된 머신 객체 목록 반환
+  - `MaasController.deleteMachine()`: DELETE 엔드포인트
+  - `MaasApiService.deleteMachine()`: MAAS API DELETE 호출
+- **내부 로직 흐름**:
+  1. 사용자가 머신 체크박스를 선택하면 `selectedMachines` 배열에 머신 ID 추가
+  2. `selectedMachines.length > 0`이 되면 액션 바가 화면 상단에 표시됨
+  3. 액션 바 구성:
+     - **Actions 드롭다운**: Commission, Allocate, Deploy, Release, Abort
+     - **Power 드롭다운**: Turn on, Turn off (Coming soon - 비활성화)
+     - **Delete 버튼**: 직접 클릭 가능
+     - **선택된 머신 수 표시**: "X selected"
+  4. Actions 드롭다운에서 액션 선택 시:
+     - `handleBulkAction(action)` 호출
+     - 확인 메시지 표시
+     - 선택된 각 머신에 대해 해당 액션 수행 (상태 확인 후)
+     - 각 머신의 상태에 따라 액션 가능 여부 판단
+  5. Delete 버튼 클릭 시:
+     - `handleBulkDelete()` 호출
+     - 확인 메시지 표시 ("이 작업은 되돌릴 수 없습니다")
+     - 선택된 모든 머신에 대해 병렬로 DELETE API 호출
+     - 성공/실패 결과 집계 및 메시지 표시
+     - 500ms 대기 후 머신 목록 새로고침
+     - 선택 해제
+- **액션별 동작 규칙**:
+  - **Commission**: 선택된 머신 중 Commission 가능한 머신만 처리 (`canCommission()` 체크)
+  - **Allocate**: 현재 API 미구현으로 항상 비활성화
+  - **Deploy**: Ready 또는 Allocated 상태인 머신만 처리
+  - **Release**: Failed Deployment 또는 Failed Disk Erasing 상태인 머신만 처리
+  - **Abort**: Commissioning 또는 Deploying 상태인 머신만 처리
+  - **Delete**: 모든 선택된 머신에 대해 삭제 수행 (상태 무관)
+- **백엔드 API**:
+  - **DELETE `/api/machines/{systemId}`**: 머신 삭제
+    - 요청 파라미터: `maasUrl`, `apiKey`
+    - MAAS API: `DELETE /MAAS/api/2.0/machines/{systemId}/`
+    - 응답: 성공 시 200 OK, 실패 시 에러 메시지
+- **UI/UX 특징**:
+  - 액션 바는 헤더 영역 오른쪽에 표시 (연결 상태 표시기 왼쪽)
+  - 흰색 배경, 그림자 효과, 둥근 모서리
+  - 드롭다운 메뉴는 Power 드롭다운과 동일한 스타일
+  - 비활성화된 액션은 회색으로 표시되고 클릭 불가
+  - 선택된 머신 수는 액션 바 오른쪽에 표시
+  - 외부 클릭 시 드롭다운 메뉴 자동 닫힘
+- **에러 처리**:
+  - 일괄 삭제 시 일부 실패해도 성공한 머신은 삭제됨
+  - 실패한 머신의 ID와 에러 메시지를 알림으로 표시
+  - HTTP 2xx 상태 코드는 성공으로 간주 (DELETE는 응답 본문이 없을 수 있음)
+  - 각 액션은 개별 머신에 대해 try-catch로 에러 처리
+  - 액션 수행 후 머신 목록 자동 새로고침
 
 #### 기능명: 머신 추가 (Add Machine)
 - **설명**: 새로운 물리적 서버를 MAAS에 등록
@@ -362,6 +476,36 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **에러 처리**:
   - 배포 불가능한 상태에서는 버튼 비활성화
   - API 오류 메시지 표시
+
+#### 기능명: Power 관리 (Power Management)
+- **설명**: 머신의 전원 상태 확인 및 전원 제어 (켜기/끄기)
+- **입력**: 
+  - System ID
+  - Power Action (on/off)
+- **출력**: 전원 상태 변경 결과
+- **주요 코드 파일**:
+  - `MachinesTab.vue`: Power 컬럼 UI 및 드롭다운 메뉴
+  - `togglePowerMenu()`: Power 드롭다운 메뉴 토글
+  - `handlePowerAction()`: Power 액션 처리 (현재 미구현)
+- **내부 로직 흐름**:
+  1. Power 컬럼에 Power State와 Power Type 표시
+  2. Power 컬럼에 마우스 호버 시 드롭다운 아이콘(▼) 표시
+  3. 드롭다운 아이콘 클릭 시 Power 액션 메뉴 표시
+  4. "Turn on" 또는 "Turn off" 선택
+  5. `handlePowerAction()` 함수 호출
+  6. 백엔드 API 호출 (현재 미구현 - TODO)
+- **UI 구성**:
+  - **Power 컬럼**: Power State (상단), Power Type (하단) 표시
+  - **드롭다운 메뉴**: 호버 또는 클릭 시 표시되는 컨텍스트 메뉴
+    - "TAKE ACTION:" 헤더
+    - "Turn on" 옵션 (녹색 아이콘)
+    - "Turn off" 옵션 (검은색 아이콘)
+- **현재 상태**: 
+  - ✅ UI 구현 완료 (Power 표시, 드롭다운 메뉴)
+  - ❌ 백엔드 API 연결 미구현 (TODO 주석 존재)
+- **에러 처리**: 
+  - 머신을 찾을 수 없는 경우 경고 로그
+  - 메뉴 위치 계산 실패 시 메뉴 닫기
 
 #### 기능명: 머신 릴리스 (Release)
 - **설명**: 배포 실패한 머신을 릴리스하여 다시 사용 가능한 상태로 변경
@@ -573,6 +717,9 @@ New (다시 시작)
   - `getDeployButtonDisabled()`: Deploy 버튼 활성화 여부 결정
   - `handleDeployButtonClick()`: Deploy 버튼 클릭 처리
   - `isFailedDeployment()`: Failed Deployment 상태 확인
+  - `togglePowerMenu()`: Power 드롭다운 메뉴 토글
+  - `handlePowerAction()`: Power 액션 처리 (Turn on/Turn off)
+  - `getMachineById()`: 머신 ID로 머신 객체 조회
 
 ### 3.5 WebSocket 실시간 업데이트
 
@@ -645,6 +792,7 @@ public class MaasController {
     - POST /api/machines/{systemId}/abort
     - POST /api/machines/{systemId}/deploy
     - POST /api/machines/{systemId}/release
+    - DELETE /api/machines/{systemId}
     - GET /api/machines/{systemId}/block-devices
     - GET /api/fabrics
     - GET /api/fabrics/{fabricId}/vlans
@@ -652,6 +800,8 @@ public class MaasController {
     - PUT /api/machines/{systemId}/interfaces/{interfaceId}/vlan
     - POST /api/machines/{systemId}/interfaces/{interfaceId}/link-subnet
     - POST /api/machines/{systemId}/interfaces/{interfaceId}/unlink-subnet
+    - POST /api/machines/{systemId}/power-on (예정 - UI 구현 완료, API 미구현)
+    - POST /api/machines/{systemId}/power-off (예정 - UI 구현 완료, API 미구현)
     - GET /api/test-connection
 }
 ```
@@ -683,6 +833,8 @@ public class MaasController {
   - `testConnection()`: 연결 테스트
   - `calculateMachineStats()`: 통계 계산
   - `getMachineBlockDevices()`: Block devices 조회
+  - `powerOnMachine()`: 머신 전원 켜기 (예정 - UI 구현 완료, API 미구현)
+  - `powerOffMachine()`: 머신 전원 끄기 (예정 - UI 구현 완료, API 미구현)
 
 ##### MaasAuthService
 - **역할**: OAuth 1.0 인증 헤더 생성
@@ -848,6 +1000,21 @@ public class MaasController {
 }
 ```
 
+##### DELETE /api/machines/{systemId}
+- **설명**: 머신 삭제
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+  - 성공 시: HTTP 200 OK (응답 본문 없을 수 있음)
+  - 실패 시: HTTP 500 Internal Server Error
+```json
+{
+  "error": "Failed to delete machine"
+}
+```
+- **MAAS API**: `DELETE /MAAS/api/2.0/machines/{systemId}/`
+
 ##### GET /api/test-connection
 - **설명**: MAAS 서버 연결 테스트
 - **요청 파라미터**:
@@ -987,6 +1154,36 @@ public class MaasController {
 }
 ```
 
+##### POST /api/machines/{systemId}/power-on (예정)
+- **설명**: 머신 전원 켜기
+- **현재 상태**: UI 구현 완료, 백엔드 API 미구현
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **예상 응답**:
+```json
+{
+  "success": true,
+  "data": { /* 전원 켜기 결과 */ }
+}
+```
+- **MAAS API**: `/MAAS/api/2.0/machines/{systemId}/op-power_on` POST 요청
+
+##### POST /api/machines/{systemId}/power-off (예정)
+- **설명**: 머신 전원 끄기
+- **현재 상태**: UI 구현 완료, 백엔드 API 미구현
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **예상 응답**:
+```json
+{
+  "success": true,
+  "data": { /* 전원 끄기 결과 */ }
+}
+```
+- **MAAS API**: `/MAAS/api/2.0/machines/{systemId}/op-power_off` POST 요청
+
 ### 4.2 프론트엔드 기술 스택
 
 #### 프레임워크 및 라이브러리
@@ -1030,6 +1227,9 @@ public class MaasController {
   - `selectedMachines`: 선택된 머신 ID 목록
   - `currentPage`: 현재 페이지
   - `connectionStatus`: WebSocket 연결 상태
+  - `hoveredPowerMachine`: Power 컬럼 호버 상태
+  - `openPowerMenu`: 열린 Power 메뉴 ID
+  - `powerMenuPosition`: Power 메뉴 위치
 - **메서드**:
   - `loadMachines()`: 머신 목록 로드
   - `showAddMachineModal()`: 머신 추가 모달 표시
@@ -1041,6 +1241,9 @@ public class MaasController {
   - `handleDeployButtonClick()`: 배포 버튼 클릭 처리
   - `deployMachine()`: 머신 배포
   - `releaseMachine()`: 머신 릴리스
+  - `togglePowerMenu()`: Power 드롭다운 메뉴 토글
+  - `handlePowerAction()`: Power 액션 처리 (Turn on/Turn off)
+  - `getMachineById()`: 머신 ID로 머신 객체 조회
   - `filteredMachines`: 검색/필터링된 머신 목록 (computed)
   - `paginatedMachines`: 페이지네이션된 머신 목록 (computed)
 
@@ -1134,14 +1337,15 @@ maas.default.api-key=consumer_key:token:token_secret
 #### Machines Tab
 - **레이아웃**: 테이블 형태
 - **컴포넌트**:
-  - 헤더 (제목, 연결 상태 표시기)
+  - 헤더 (제목, 액션 바, 연결 상태 표시기)
+    - 액션 바 (머신 선택 시 표시): Actions 드롭다운, Power 드롭다운, Delete 버튼, 선택된 머신 수
   - 검색 박스
   - 필터 버튼 (All, New, Commissioning, Ready, Allocated, Deployed, Failed)
   - "Add Machine" 버튼
   - 머신 테이블
-    - 체크박스 컬럼
+    - 체크박스 컬럼 (전체 선택 체크박스 + 상태별 선택 드롭다운 아이콘)
     - FQDN 컬럼 (호스트명, MAC 주소, IP 주소)
-    - Power 컬럼
+    - Power 컬럼 (Power State, Power Type, Power Action 드롭다운)
     - Status 컬럼 (상태 배지, 상태 메시지)
     - Owner/Tags 컬럼
     - Pool, Zone, Fabric 컬럼
@@ -1374,20 +1578,39 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
   - 드롭다운 메뉴로 추가 액션 제공
   - Tag 관리, Owner 변경, Zone/Pool 변경 등
 
-#### 3. 배포 중단 (Abort Deploy) 기능
+#### 3. Power Action 기능 (Turn on/Turn off)
+- **현재 상태**: UI 구현 완료, 백엔드 API 미구현
+- **필요 작업**:
+  - `MaasController`에 Power 제어 엔드포인트 추가
+    - `POST /api/machines/{systemId}/power-on`
+    - `POST /api/machines/{systemId}/power-off`
+  - `MaasApiService`에 Power 제어 메서드 추가
+    - `powerOnMachine()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-power_on` 호출
+    - `powerOffMachine()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-power_off` 호출
+  - 프론트엔드 `handlePowerAction()` 함수에 API 호출 로직 구현
+  - Power 상태 실시간 업데이트 (WebSocket 연동)
+
+#### 4. 배포 중단 (Abort Deploy) 기능
 - **현재 상태**: UI에 버튼은 있으나 백엔드 API 미구현
 - **필요 작업**:
   - `MaasController`에 `abortDeploy` 엔드포인트 추가
   - `MaasApiService`에 `abortDeploy` 메서드 추가
   - MAAS API `/MAAS/api/2.0/machines/{systemId}/op-abort` 호출 (배포 중단용)
 
-#### 4. 다중 머신 선택 액션
-- **현재 상태**: 체크박스는 있으나 다중 선택 액션 미구현
+#### 5. 다중 머신 선택 액션
+- **현재 상태**: 상태별 머신 선택 기능 및 일괄 액션 바 구현 완료, Delete 기능 완료
+- **구현 완료**:
+  - ✅ 상태별 머신 일괄 선택/해제 기능
+  - ✅ 전체 선택 체크박스와 상태별 선택 드롭다운 통합
+  - ✅ 일괄 액션 바 (머신 선택 시 상단 표시)
+  - ✅ 일괄 Delete 기능 (백엔드 API 연결 및 테스트 완료)
+  - ✅ Actions 드롭다운 메뉴 (Commission, Allocate, Deploy, Release, Abort)
+  - ✅ Power 드롭다운 메뉴 (UI만 구현, 기능 예정)
 - **필요 작업**:
-  - 다중 머신 선택 시 일괄 액션 버튼 표시
-  - 일괄 커미셔닝, 일괄 배포 등
+  - 일괄 Commission, Deploy, Release, Abort 기능 백엔드 API 연결
+  - 일괄 Power On/Off 기능 구현
 
-#### 5. 에러 처리 개선
+#### 6. 에러 처리 개선
 - **현재 상태**: 기본적인 에러 처리만 구현
 - **필요 작업**:
   - 사용자 친화적인 에러 메시지
