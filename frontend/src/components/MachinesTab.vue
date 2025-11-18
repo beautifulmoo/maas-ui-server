@@ -7,7 +7,7 @@
       <div v-if="!loading && !error && selectedMachines.length > 0" class="action-bar">
       <div 
         ref="actionsMenuButton"
-        class="action-bar-item"
+        class="action-bar-item action-bar-actions-item"
         @click.stop="toggleActionsMenu($event)"
       >
         <span class="action-bar-label">Actions</span>
@@ -67,7 +67,7 @@
       </div>
       <div 
         ref="powerActionMenuButton"
-        class="action-bar-item"
+        class="action-bar-item action-bar-power-item"
         @click.stop="togglePowerActionMenu($event)"
       >
         <span class="action-bar-label">Power</span>
@@ -202,8 +202,8 @@
               <div class="machine-name">
                 <strong>{{ machine.hostname || `Machine ${machine.id}` }}</strong>
                 <div class="machine-details">
-                  <span class="mac-address">{{ machine.mac_addresses?.[0] || '' }}</span>
-                  <span class="ip-address">{{ machine.ip_addresses?.[0] || '' }}</span>
+                  <span class="mac-address">{{ getFirstMacAddress(machine) }}</span>
+                  <span class="ip-address">{{ getFirstIpAddress(machine) }}</span>
                 </div>
               </div>
             </td>
@@ -268,9 +268,9 @@
             </td>
                    <td class="actions-col">
                      <div class="action-buttons">
-                       <!-- Failed Deployment 상태일 때는 Release 버튼 표시 -->
+                       <!-- Failed Deployment 또는 Deployed 상태일 때는 Release 버튼 표시 -->
                        <button 
-                         v-if="isFailedDeployment(machine.status)"
+                         v-if="isFailedDeployment(machine.status) || machine.status?.toLowerCase() === 'deployed'"
                          class="btn-small btn-release"
                          @click="releaseMachine(machine)"
                          :disabled="releasingMachines.includes(machine.id)"
@@ -327,6 +327,41 @@
         </tbody>
       </table>
         </div>
+    
+    <!-- Confirmation Modal -->
+    <Teleport to="body">
+      <div v-if="showConfirmModal" class="modal-overlay" @click.self="cancelConfirm">
+        <div class="modal-content confirm-modal-content">
+          <div class="modal-header">
+            <h3>{{ confirmModalTitle }}</h3>
+          </div>
+          <div class="modal-body confirm-modal-body">
+            <p class="confirm-message">{{ confirmModalMessage }}</p>
+          </div>
+          <div class="modal-footer confirm-modal-footer">
+            <button class="btn-secondary" @click="cancelConfirm">취소</button>
+            <button class="btn-primary" @click="confirmAction">{{ confirmModalButtonText }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+    
+    <!-- Alert Modal -->
+    <Teleport to="body">
+      <div v-if="showAlertModal" class="modal-overlay" @click.self="closeAlert">
+        <div class="modal-content alert-modal-content">
+          <div class="modal-header">
+            <h3>{{ alertModalTitle }}</h3>
+          </div>
+          <div class="modal-body alert-modal-body">
+            <p class="alert-message">{{ alertModalMessage }}</p>
+          </div>
+          <div class="modal-footer alert-modal-footer">
+            <button class="btn-primary" @click="closeAlert">확인</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
     
     <!-- Status Select Dropdown Menu (Teleport outside of v-for) -->
     <Teleport to="body">
@@ -465,6 +500,7 @@
                     @change="updateFabricForInterface(networkInterface)"
                   >
                     <option :value="null">Select Fabric</option>
+                    <option :value="-1">Disconnect</option>
                     <option 
                       v-for="fabric in availableFabrics" 
                       :key="fabric.id"
@@ -484,7 +520,8 @@
                   </span>
                 </div>
                 
-                <div class="form-group">
+                <!-- IP Assignment는 Fabric이 선택되었을 때만 표시 -->
+                <div class="form-group" v-if="networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '' && networkInterface.editableFabric !== -1">
                   <label>IP Assignment</label>
                   <select 
                     v-model="networkInterface.ipAssignment"
@@ -497,7 +534,7 @@
                   </select>
                 </div>
                 
-                <div class="form-group" v-if="networkInterface.ipAssignment === 'static'">
+                <div class="form-group" v-if="networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '' && networkInterface.editableFabric !== -1 && networkInterface.ipAssignment === 'static'">
                   <label>IP Address (Primary)</label>
                   <div class="ip-address-primary">
                     <input 
@@ -519,7 +556,8 @@
                   </div>
                 </div>
                 
-                <div class="form-group" v-if="networkInterface.secondaryIpAddresses && networkInterface.secondaryIpAddresses.length > 0">
+                <!-- Secondary IP는 Fabric이 선택되었을 때만 표시 -->
+                <div class="form-group" v-if="networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '' && networkInterface.editableFabric !== -1 && networkInterface.secondaryIpAddresses && networkInterface.secondaryIpAddresses.length > 0">
                   <label>IP Address (Secondary)</label>
                   <div 
                     v-for="(secondaryIp, secIndex) in networkInterface.secondaryIpAddresses" 
@@ -568,7 +606,8 @@
                   </div>
                 </div>
                 
-                <div class="form-group">
+                <!-- Add Secondary IP 버튼은 Fabric이 선택되었을 때만 표시 -->
+                <div class="form-group" v-if="networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '' && networkInterface.editableFabric !== -1">
                   <button 
                     type="button"
                     class="btn-add-secondary"
@@ -761,6 +800,67 @@ export default {
     const actionsMenuButton = ref(null)
     const powerActionMenuButton = ref(null)
     
+    // Confirmation Modal
+    const showConfirmModal = ref(false)
+    const confirmModalTitle = ref('확인')
+    const confirmModalMessage = ref('')
+    const confirmModalButtonText = ref('확인')
+    const confirmModalResolve = ref(null)
+    
+    // Alert Modal
+    const showAlertModal = ref(false)
+    const alertModalTitle = ref('알림')
+    const alertModalMessage = ref('')
+    const alertModalResolve = ref(null)
+    
+    // 커스텀 confirm 함수
+    const customConfirm = (message, title = '확인', buttonText = '확인') => {
+      return new Promise((resolve) => {
+        confirmModalTitle.value = title
+        confirmModalMessage.value = message
+        confirmModalButtonText.value = buttonText
+        confirmModalResolve.value = resolve
+        showConfirmModal.value = true
+      })
+    }
+    
+    // 커스텀 alert 함수
+    const customAlert = (message, title = '알림') => {
+      return new Promise((resolve) => {
+        alertModalTitle.value = title
+        alertModalMessage.value = message
+        alertModalResolve.value = resolve
+        showAlertModal.value = true
+      })
+    }
+    
+    // 확인 모달 확인 버튼
+    const confirmAction = () => {
+      showConfirmModal.value = false
+      if (confirmModalResolve.value) {
+        confirmModalResolve.value(true)
+        confirmModalResolve.value = null
+      }
+    }
+    
+    // 확인 모달 취소 버튼
+    const cancelConfirm = () => {
+      showConfirmModal.value = false
+      if (confirmModalResolve.value) {
+        confirmModalResolve.value(false)
+        confirmModalResolve.value = null
+      }
+    }
+    
+    // 알림 모달 닫기
+    const closeAlert = () => {
+      showAlertModal.value = false
+      if (alertModalResolve.value) {
+        alertModalResolve.value()
+        alertModalResolve.value = null
+      }
+    }
+    
     // Power Menu Functions
     const togglePowerMenu = (machineId, event) => {
       if (openPowerMenu.value === machineId) {
@@ -842,12 +942,16 @@ export default {
       // Filter by search query
       if (searchQuery.value) {
         const query = searchQuery.value.toLowerCase()
-        filtered = filtered.filter(machine => 
-          (machine.hostname && machine.hostname.toLowerCase().includes(query)) ||
-          (machine.ip_addresses && machine.ip_addresses.some(ip => ip.includes(query))) ||
-          (machine.mac_addresses && machine.mac_addresses.some(mac => mac.includes(query))) ||
-          machine.id.toString().includes(query)
-        )
+        filtered = filtered.filter(machine => {
+          const normalizedIps = normalizeIpAddresses(machine.ip_addresses)
+          const normalizedMacs = normalizeMacAddresses(machine.mac_addresses)
+          return (
+            (machine.hostname && machine.hostname.toLowerCase().includes(query)) ||
+            (normalizedIps.length > 0 && normalizedIps.some(ip => ip && ip.toLowerCase().includes(query))) ||
+            (normalizedMacs.length > 0 && normalizedMacs.some(mac => mac && mac.toLowerCase().includes(query))) ||
+            machine.id.toString().includes(query)
+          )
+        })
       }
       
       return filtered
@@ -885,13 +989,17 @@ export default {
               mac_addresses: macAddresses
             })
             
+            // IP 주소 추출
+            const extractedIps = extractIpAddresses(machineData)
+            const normalizedIps = extractedIps.length > 0 ? extractedIps : normalizeIpAddresses(machineData.ip_addresses)
+            
             // 기존 머신 정보를 업데이트 (interface_set 포함)
             machines.value[machineIndex] = {
               ...machines.value[machineIndex],
               hostname: machineData.hostname,
               status: getStatusName(machineData.status_name || machineData.status),
               status_message: machineData.status_message,
-              ip_addresses: machineData.ip_addresses || [],
+              ip_addresses: normalizedIps,
               mac_addresses: macAddresses,
               architecture: machineData.architecture,
               cpu_count: machineData.cpu_count || 0,
@@ -974,6 +1082,10 @@ export default {
           // MAAS API 응답을 우리 UI 형식으로 변환
           machines.value = response.data.results.map(machine => {
             const macAddresses = extractMacAddresses(machine)
+            // IP 주소 추출
+            const extractedIps = extractIpAddresses(machine)
+            const normalizedIps = extractedIps.length > 0 ? extractedIps : normalizeIpAddresses(machine.ip_addresses)
+            
             // MAC 주소로 fabric 찾기
             const fabricName = findFabricByMacAddress({
               ...machine,
@@ -985,7 +1097,7 @@ export default {
               hostname: machine.hostname,
               status: getStatusName(machine.status_name || machine.status),
               status_message: machine.status_message,
-              ip_addresses: machine.ip_addresses || [],
+              ip_addresses: normalizedIps,
               mac_addresses: macAddresses,
               architecture: machine.architecture,
               cpu_count: machine.cpu_count || 0,
@@ -1150,6 +1262,128 @@ export default {
       }
       
       return macAddresses.length > 0 ? macAddresses : []
+    }
+    
+    // interface_set에서 IP 주소를 추출하는 함수
+    const extractIpAddresses = (machine) => {
+      const ipAddresses = []
+      
+      // interface_set에서 IP 주소 추출
+      if (machine.interface_set && Array.isArray(machine.interface_set)) {
+        machine.interface_set.forEach(networkInterface => {
+          // links 배열에서 IP 주소 추출
+          if (networkInterface.links && Array.isArray(networkInterface.links)) {
+            networkInterface.links.forEach(link => {
+              if (link.ip_address && typeof link.ip_address === 'string' && link.ip_address.trim() !== '') {
+                const ip = link.ip_address.trim()
+                if (!ipAddresses.includes(ip)) {
+                  ipAddresses.push(ip)
+                }
+              }
+            })
+          }
+        })
+      }
+      
+      // boot_interface에서 IP 주소 추출
+      if (machine.boot_interface && machine.boot_interface.links && Array.isArray(machine.boot_interface.links)) {
+        machine.boot_interface.links.forEach(link => {
+          if (link.ip_address && typeof link.ip_address === 'string' && link.ip_address.trim() !== '') {
+            const ip = link.ip_address.trim()
+            if (!ipAddresses.includes(ip)) {
+              ipAddresses.push(ip)
+            }
+          }
+        })
+      }
+      
+      return ipAddresses
+    }
+    
+    // IP 주소를 배열로 정규화하는 함수
+    const normalizeIpAddresses = (ipAddresses) => {
+      if (!ipAddresses) {
+        return []
+      }
+      
+      // 이미 배열인 경우
+      if (Array.isArray(ipAddresses)) {
+        return ipAddresses.filter(ip => ip && typeof ip === 'string')
+      }
+      
+      // 문자열인 경우 파싱 시도
+      if (typeof ipAddresses === 'string') {
+        try {
+          // JSON 문자열인 경우 파싱
+          const parsed = JSON.parse(ipAddresses)
+          if (Array.isArray(parsed)) {
+            return parsed.filter(ip => ip && typeof ip === 'string')
+          } else if (parsed && typeof parsed === 'object') {
+            // { "ip": "..." } 형태인 경우
+            if (parsed.ip) {
+              return [parsed.ip]
+            }
+            // 객체의 값들을 배열로 변환
+            const values = Object.values(parsed).filter(v => v && typeof v === 'string')
+            return values.length > 0 ? values : []
+          }
+        } catch (e) {
+          // JSON 파싱 실패 시 일반 문자열로 처리
+          return [ipAddresses]
+        }
+      }
+      
+      return []
+    }
+    
+    // MAC 주소를 배열로 정규화하는 함수
+    const normalizeMacAddresses = (macAddresses) => {
+      if (!macAddresses) {
+        return []
+      }
+      
+      // 이미 배열인 경우
+      if (Array.isArray(macAddresses)) {
+        return macAddresses.filter(mac => mac && typeof mac === 'string')
+      }
+      
+      // 문자열인 경우 파싱 시도
+      if (typeof macAddresses === 'string') {
+        try {
+          // JSON 문자열인 경우 파싱
+          const parsed = JSON.parse(macAddresses)
+          if (Array.isArray(parsed)) {
+            return parsed.filter(mac => mac && typeof mac === 'string')
+          } else if (parsed && typeof parsed === 'object') {
+            // 객체의 값들을 배열로 변환
+            const values = Object.values(parsed).filter(v => v && typeof v === 'string')
+            return values.length > 0 ? values : []
+          }
+        } catch (e) {
+          // JSON 파싱 실패 시 일반 문자열로 처리
+          return [macAddresses]
+        }
+      }
+      
+      return []
+    }
+    
+    // 첫 번째 MAC 주소를 안전하게 가져오는 함수
+    const getFirstMacAddress = (machine) => {
+      if (!machine || !machine.mac_addresses) {
+        return ''
+      }
+      const normalized = normalizeMacAddresses(machine.mac_addresses)
+      return normalized.length > 0 ? normalized[0] : ''
+    }
+    
+    // 첫 번째 IP 주소를 안전하게 가져오는 함수
+    const getFirstIpAddress = (machine) => {
+      if (!machine || !machine.ip_addresses) {
+        return ''
+      }
+      const normalized = normalizeIpAddresses(machine.ip_addresses)
+      return normalized.length > 0 ? normalized[0] : ''
     }
     
     // MAC 주소로 fabric 이름을 찾는 함수
@@ -1578,7 +1812,8 @@ export default {
           statusText = 'Deployed'
         }
         const confirmMessage = `이 머신은 이미 Commissioning이 완료되어 ${statusText} 상태입니다.\n\n정말로 다시 Commissioning을 진행하시겠습니까?`
-        if (!window.confirm(confirmMessage)) {
+        const confirmed = await customConfirm(confirmMessage, '재커미셔닝 확인')
+        if (!confirmed) {
           return // 사용자가 취소하면 진행하지 않음
         }
       }
@@ -1668,7 +1903,17 @@ export default {
     }
     
     // Release Machine
-    const releaseMachine = async (machine) => {
+    const releaseMachine = async (machine, skipConfirm = false) => {
+      // 확인 메시지 표시 (skipConfirm이 true이면 건너뛰기 - 일괄 작업에서 이미 확인했을 경우)
+      if (!skipConfirm) {
+        const machineName = machine.hostname || `Machine ${machine.id}`
+        const confirmMessage = `머신 "${machineName}"을(를) Release 하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+        const confirmed = await customConfirm(confirmMessage, 'Release 확인', 'Release')
+        if (!confirmed) {
+          return
+        }
+      }
+      
       releasingMachines.value.push(machine.id)
       
       try {
@@ -1894,10 +2139,37 @@ export default {
       return machines.value.filter(m => selectedMachines.value.includes(m.id))
     }
     
-    // 일괄 작업 가능 여부 확인 함수들
+    // 각 머신의 가능한 액션 목록을 반환하는 함수
+    const getAvailableActions = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      const actions = []
+      
+      if (status === 'new') {
+        actions.push('commission')
+      } else if (status === 'commissioning') {
+        actions.push('abort')
+      } else if (status === 'ready' || status === 'allocated') {
+        actions.push('commission', 'deploy')
+      } else if (status === 'deployed') {
+        actions.push('release')
+      } else if (isFailedDeployment(status)) {
+        actions.push('release')
+      } else if (status === 'deploying') {
+        actions.push('abort')
+      } else if (status.startsWith('failed')) {
+        // 기타 failed 상태는 commission 가능
+        actions.push('commission')
+      }
+      
+      return actions
+    }
+    
+    // 일괄 작업 가능 여부 확인 함수들 (교집합 로직)
     const canBulkCommission = () => {
       const selected = getSelectedMachines()
-      return selected.some(m => canCommission(m))
+      if (selected.length === 0) return false
+      // 모든 선택된 머신이 commission 가능해야 함
+      return selected.every(m => getAvailableActions(m).includes('commission'))
     }
     
     const canBulkAllocate = () => {
@@ -1907,26 +2179,23 @@ export default {
     
     const canBulkDeploy = () => {
       const selected = getSelectedMachines()
-      return selected.some(m => {
-        const status = m.status?.toLowerCase() || ''
-        return status === 'ready' || status === 'allocated'
-      })
+      if (selected.length === 0) return false
+      // 모든 선택된 머신이 deploy 가능해야 함
+      return selected.every(m => getAvailableActions(m).includes('deploy'))
     }
     
     const canBulkRelease = () => {
       const selected = getSelectedMachines()
-      return selected.some(m => {
-        const status = m.status?.toLowerCase() || ''
-        return status === 'failed deployment' || status === 'failed disk erasing'
-      })
+      if (selected.length === 0) return false
+      // 모든 선택된 머신이 release 가능해야 함
+      return selected.every(m => getAvailableActions(m).includes('release'))
     }
     
     const canBulkAbort = () => {
       const selected = getSelectedMachines()
-      return selected.some(m => {
-        const status = m.status?.toLowerCase() || ''
-        return status === 'commissioning' || status === 'deploying'
-      })
+      if (selected.length === 0) return false
+      // 모든 선택된 머신이 abort 가능해야 함
+      return selected.every(m => getAvailableActions(m).includes('abort'))
     }
     
     // 일괄 작업 핸들러
@@ -1951,14 +2220,15 @@ export default {
           confirmMessage = `선택된 ${selected.length}개의 머신을 Deploy 하시겠습니까?`
           break
         case 'release':
-          confirmMessage = `선택된 ${selected.length}개의 머신을 Release 하시겠습니까?`
+          confirmMessage = `선택된 ${selected.length}개의 머신을 Release 하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
           break
         case 'abort':
           confirmMessage = `선택된 ${selected.length}개의 머신의 작업을 Abort 하시겠습니까?`
           break
       }
       
-      if (!window.confirm(confirmMessage)) {
+      const confirmed = await customConfirm(confirmMessage, '일괄 작업 확인')
+      if (!confirmed) {
         return
       }
       
@@ -1983,8 +2253,9 @@ export default {
               break
             case 'release':
               const releaseStatus = machine.status?.toLowerCase() || ''
-              if (releaseStatus === 'failed deployment' || releaseStatus === 'failed disk erasing') {
-                await releaseMachine(machine)
+              if (releaseStatus === 'failed deployment' || releaseStatus === 'failed disk erasing' || releaseStatus === 'deployed') {
+                // 일괄 작업에서는 이미 확인했으므로 skipConfirm = true
+                await releaseMachine(machine, true)
               }
               break
             case 'abort':
@@ -2004,12 +2275,13 @@ export default {
       
       if (selected.length === 0) {
         console.warn('No machines selected for deletion')
-        alert('삭제할 머신을 선택해주세요.')
+        await customAlert('삭제할 머신을 선택해주세요.', '알림')
         return
       }
       
       const confirmMessage = `선택된 ${selected.length}개의 머신을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
-      if (!window.confirm(confirmMessage)) {
+      const confirmed = await customConfirm(confirmMessage, '삭제 확인', '삭제')
+      if (!confirmed) {
         console.log('Delete cancelled by user')
         return
       }
@@ -2067,7 +2339,7 @@ export default {
       if (failCount > 0) {
         const failedMachines = results.filter(r => !r.success)
         const errorMessages = failedMachines.map(r => `Machine ${r.machineId}: ${r.error}`).join('\n')
-        alert(`일부 머신 삭제 실패 (${successCount}/${selected.length} 성공):\n${errorMessages}`)
+        await customAlert(`일부 머신 삭제 실패 (${successCount}/${selected.length} 성공):\n${errorMessages}`, '삭제 실패')
       } else {
         console.log(`Successfully deleted ${successCount} machine(s)`)
       }
@@ -2805,9 +3077,15 @@ export default {
             // 원본 Secondary IP 목록 저장 (삭제 감지용)
             const originalSecondaryIpAddresses = JSON.parse(JSON.stringify(secondaryIpAddresses))
             
+            // 원래 fabric ID 저장 (fabric 변경 시 unlink에 사용)
+            const originalFabricId = iface.vlan?.fabric_id !== null && iface.vlan?.fabric_id !== undefined ? 
+              (typeof iface.vlan.fabric_id === 'string' ? parseInt(iface.vlan.fabric_id, 10) : iface.vlan.fabric_id) : 
+              null
+            
             return {
               ...iface,
               editableFabric: fabricId !== null && fabricId !== undefined && fabricId !== '' ? Number(fabricId) : null,
+              originalFabricId: originalFabricId, // 원본 Fabric ID 저장 (fabric 변경 시 unlink에 사용)
               ipAssignment: ipAssignment, // IP Assignment 상태
               originalIpAssignment: ipAssignment, // 원본 IP Assignment 저장 (변경 감지용)
               primaryIpAddress: primaryIpValue,
@@ -2837,6 +3115,16 @@ export default {
     // Fabric 선택 시 해당 인터페이스의 subnet 업데이트
     const updateFabricForInterface = (networkInterface) => {
       const fabricId = networkInterface.editableFabric
+      
+      // Disconnect 선택 시 (-1)
+      if (fabricId === -1) {
+        networkInterface.matchedSubnet = null
+        // IP Assignment를 unconfigured로 변경
+        networkInterface.ipAssignment = 'unconfigured'
+        networkInterface.primaryIpAddress = ''
+        return
+      }
+      
       // fabricId가 null, undefined, 빈 문자열인 경우만 체크 (0은 유효한 값)
       if (fabricId === null || fabricId === undefined || fabricId === '') {
         networkInterface.matchedSubnet = null
@@ -2984,18 +3272,99 @@ export default {
           try {
             // 1. Fabric 변경 저장 (editableFabric이 변경되었으면)
             let fabricChanged = false
-            if (networkInterface.editableFabric !== null && networkInterface.editableFabric !== undefined && networkInterface.editableFabric !== '') {
-              console.log(`Saving fabric for interface ${interfaceId}: editableFabric=${networkInterface.editableFabric} (${typeof networkInterface.editableFabric})`)
-              // 타입 안전한 비교를 위해 여러 방법 시도
-              const fabric = availableFabrics.value.find(f => 
-                f.id === networkInterface.editableFabric || 
-                String(f.id) === String(networkInterface.editableFabric) ||
-                Number(f.id) === Number(networkInterface.editableFabric)
-              )
-              if (fabric && fabric.vlan_id) {
-                const vlanId = String(fabric.vlan_id)
+            const originalFabricId = networkInterface.originalFabricId
+            const newFabricId = networkInterface.editableFabric
+            
+            // Disconnect 선택 시 (-1): VLAN 삭제 (vlan=""로 설정)
+            if (newFabricId === -1) {
+              console.log(`[Save Network] Disconnect selected for interface ${interfaceName}, removing VLAN`)
+              
+              try {
+                // VLAN을 빈 문자열로 설정하여 삭제
+                const vlanResponse = await axios.put(
+                  `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/vlan`,
+                  null,
+                  {
+                    params: {
+                      maasUrl: apiParams.maasUrl,
+                      apiKey: apiParams.apiKey,
+                      vlanId: '' // 빈 문자열로 VLAN 삭제
+                    }
+                  }
+                )
                 
-                console.log(`Updating VLAN for interface ${interfaceIdStr} (original: ${interfaceId}, type: ${typeof interfaceId}): vlanId=${vlanId}`)
+                if (!vlanResponse.data || !vlanResponse.data.success) {
+                  const errorMessage = vlanResponse.data?.error || 'Unknown error'
+                  console.error(`[Save Network] Failed to remove VLAN for Disconnect:`, errorMessage)
+                  throw new Error(`Failed to remove VLAN for interface ${interfaceName}: ${errorMessage}`)
+                }
+                
+                console.log(`[Save Network] VLAN removed successfully for Disconnect on interface ${interfaceName}`)
+              } catch (err) {
+                console.error(`[Save Network] Error removing VLAN for Disconnect:`, err)
+                throw err
+              }
+              
+              // Disconnect 처리 완료, 다음 인터페이스로
+              continue
+            }
+            
+            // Fabric이 변경되었는지 확인
+            const fabricChangedFlag = originalFabricId !== null && 
+                                     newFabricId !== null && 
+                                     newFabricId !== undefined && 
+                                     newFabricId !== '' &&
+                                     newFabricId !== -1 &&
+                                     (Number(originalFabricId) !== Number(newFabricId))
+            
+            if (fabricChangedFlag || (originalFabricId === null && newFabricId !== null && newFabricId !== undefined && newFabricId !== '' && newFabricId !== -1)) {
+              console.log(`[Save Network] Fabric changed for interface ${interfaceName}: originalFabricId=${originalFabricId}, newFabricId=${newFabricId}`)
+              
+              // Fabric이 변경된 경우, 먼저 원래 fabric의 link를 unlink해야 함
+              // 단, unlink가 실패해도 Fabric 변경은 계속 진행 (이미 Fabric이 변경되었을 수 있음)
+              if (originalFabricId !== null && networkInterface.originalPrimaryLinkId) {
+                console.log(`[Save Network] Unlinking Primary link with original fabric ID ${originalFabricId} for interface ${interfaceName} (linkId: ${networkInterface.originalPrimaryLinkId})`)
+                
+                try {
+                  const unlinkResponse = await axios.post(
+                    `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                    null,
+                    {
+                      params: {
+                        maasUrl: apiParams.maasUrl,
+                        apiKey: apiParams.apiKey,
+                        linkId: networkInterface.originalPrimaryLinkId
+                      }
+                    }
+                  )
+                  
+                  if (!unlinkResponse.data || !unlinkResponse.data.success) {
+                    const errorMessage = unlinkResponse.data?.error || 'Unknown error'
+                    console.warn(`[Save Network] Failed to unlink Primary link with original fabric for interface ${interfaceName}:`, errorMessage)
+                    console.warn(`[Save Network] Continuing with fabric change despite unlink failure (link may already be removed or fabric already changed)`)
+                    // unlink 실패해도 계속 진행 (Fabric 변경은 이미 성공했을 수 있고, IP Assignment 저장도 계속 진행해야 함)
+                  } else {
+                    console.log(`[Save Network] Primary link unlinked successfully with original fabric for interface ${interfaceName}`)
+                  }
+                } catch (err) {
+                  console.warn(`[Save Network] Error unlinking with original fabric (continuing anyway):`, err)
+                  // unlink 실패해도 계속 진행 (Fabric 변경은 이미 성공했을 수 있고, IP Assignment 저장도 계속 진행해야 함)
+                }
+              }
+              
+              // 새로운 fabric로 VLAN 업데이트
+              if (newFabricId !== null && newFabricId !== undefined && newFabricId !== '') {
+                console.log(`Saving fabric for interface ${interfaceId}: editableFabric=${newFabricId} (${typeof newFabricId})`)
+                // 타입 안전한 비교를 위해 여러 방법 시도
+                const fabric = availableFabrics.value.find(f => 
+                  f.id === newFabricId || 
+                  String(f.id) === String(newFabricId) ||
+                  Number(f.id) === Number(newFabricId)
+                )
+                if (fabric && fabric.vlan_id) {
+                  const vlanId = String(fabric.vlan_id)
+                  
+                  console.log(`Updating VLAN for interface ${interfaceIdStr} (original: ${interfaceId}, type: ${typeof interfaceId}): vlanId=${vlanId}`)
                 
                 const vlanResponse = await axios.put(
                   `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/vlan`,
@@ -3015,6 +3384,9 @@ export default {
                 
                 console.log(`VLAN updated successfully for interface ${interfaceId}`)
                 fabricChanged = true
+                
+                // 원래 fabric ID를 새로운 fabric ID로 업데이트 (다음 변경을 위해)
+                networkInterface.originalFabricId = Number(newFabricId)
                 
                 // Fabric 변경 후 최신 머신 정보를 가져와서 올바른 link ID와 subnet 업데이트
                 console.log(`[Save Network] Fabric changed, fetching latest machine info to update link IDs and subnet...`)
@@ -3084,12 +3456,23 @@ export default {
                         const latestPrimaryLinkId = String(primaryLink.id)
                         console.log(`[Save Network] Updated Primary link ID for interface ${interfaceName}: ${networkInterface.originalPrimaryLinkId || 'N/A'} → ${latestPrimaryLinkId}`)
                         networkInterface.originalPrimaryLinkId = latestPrimaryLinkId
+                      } else {
+                        // Fabric 변경 후 link가 없으면 originalPrimaryLinkId를 null로 설정 (새로 link 생성해야 함)
+                        console.log(`[Save Network] No primary link found after fabric change for interface ${interfaceName}, will create new link`)
+                        networkInterface.originalPrimaryLinkId = null
                       }
+                    } else {
+                      // links가 없으면 originalPrimaryLinkId를 null로 설정
+                      console.log(`[Save Network] No links found after fabric change for interface ${interfaceName}, will create new link`)
+                      networkInterface.originalPrimaryLinkId = null
                     }
                   }
                 } catch (err) {
                   console.warn(`[Save Network] Failed to fetch latest machine info after fabric change:`, err)
-                  // 에러가 발생해도 계속 진행 (기존 link ID 사용)
+                  // 에러가 발생해도 계속 진행
+                  // Fabric 변경 후 link가 없을 수 있으므로 null로 설정
+                  networkInterface.originalPrimaryLinkId = null
+                }
                 }
               }
             }
@@ -3208,28 +3591,37 @@ export default {
                 console.log(`[Save Network] Updating Primary IP for interface ${interfaceName} (id: ${interfaceIdStr}): ip=${ipAddress} (changed from ${originalPrimaryIp || 'empty'}), subnetId=${subnetId}, originalLinkId=${originalPrimaryLinkId || 'N/A'}`)
                 
                 // 기존 Primary link가 있으면 먼저 삭제
+                // 단, Fabric 변경 후 link가 없을 수 있으므로 null이면 unlink 시도하지 않음
                 if (originalPrimaryLinkId) {
                   console.log(`[Save Network] Unlinking existing Primary link (id: ${originalPrimaryLinkId}) for interface ${interfaceName}`)
                   
-                  const unlinkResponse = await axios.post(
-                    `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
-                    null,
-                    {
-                      params: {
-                        maasUrl: apiParams.maasUrl,
-                        apiKey: apiParams.apiKey,
-                        linkId: originalPrimaryLinkId
+                  try {
+                    const unlinkResponse = await axios.post(
+                      `http://localhost:8081/api/machines/${machineId}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                      null,
+                      {
+                        params: {
+                          maasUrl: apiParams.maasUrl,
+                          apiKey: apiParams.apiKey,
+                          linkId: originalPrimaryLinkId
+                        }
                       }
+                    )
+                    
+                    if (!unlinkResponse.data || !unlinkResponse.data.success) {
+                      const errorMessage = unlinkResponse.data?.error || 'Unknown error'
+                      console.warn(`[Save Network] Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
+                      console.warn(`[Save Network] Continuing with static IP link creation (link may already be removed)`)
+                      // unlink 실패해도 계속 진행 (link가 이미 제거되었을 수 있음)
+                    } else {
+                      console.log(`[Save Network] Primary link unlinked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
                     }
-                  )
-                  
-                  if (!unlinkResponse.data || !unlinkResponse.data.success) {
-                    const errorMessage = unlinkResponse.data?.error || 'Unknown error'
-                    console.error(`[Save Network] Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}):`, errorMessage)
-                    throw new Error(`Failed to unlink Primary link for interface ${interfaceName} (id: ${interfaceIdStr}): ${errorMessage}`)
+                  } catch (err) {
+                    console.warn(`[Save Network] Error unlinking Primary link (continuing anyway):`, err)
+                    // unlink 실패해도 계속 진행 (link가 이미 제거되었을 수 있음)
                   }
-                  
-                  console.log(`[Save Network] Primary link unlinked successfully for interface ${interfaceName} (id: ${interfaceIdStr})`)
+                } else {
+                  console.log(`[Save Network] No existing Primary link to unlink for interface ${interfaceName}, creating new link`)
                 }
                 
                 // 새로운 Primary link 생성 (STATIC mode)
@@ -3546,6 +3938,11 @@ export default {
             
             // MAC 주소 추출 및 fabric 찾기
             const macAddresses = extractMacAddresses(machineData) || machines.value[machineIndex].mac_addresses || []
+            // IP 주소 추출
+            const extractedIps = extractIpAddresses(machineData)
+            const normalizedIps = extractedIps.length > 0 ? extractedIps : normalizeIpAddresses(machineData.ip_addresses)
+            const finalIps = normalizedIps.length > 0 ? normalizedIps : (machines.value[machineIndex].ip_addresses || [])
+            
             const fabricName = findFabricByMacAddress({
               ...machineData,
               mac_addresses: macAddresses,
@@ -3559,7 +3956,7 @@ export default {
               power_state: machineData.power_state,
               power_type: machineData.power_type || machines.value[machineIndex].power_type || 'Manual',
               hostname: machineData.hostname,
-              ip_addresses: machineData.ip_addresses || machines.value[machineIndex].ip_addresses || [],
+              ip_addresses: finalIps,
               mac_addresses: macAddresses,
               fabric: fabricName,
               interface_set: machineData.interface_set || machines.value[machineIndex].interface_set || []
@@ -3571,6 +3968,10 @@ export default {
         } else if (newMessage.action === 'create') {
           // MAC 주소 추출 및 fabric 찾기
           const macAddresses = extractMacAddresses(machineData)
+          // IP 주소 추출
+          const extractedIps = extractIpAddresses(machineData)
+          const normalizedIps = extractedIps.length > 0 ? extractedIps : normalizeIpAddresses(machineData.ip_addresses)
+          
           const fabricName = findFabricByMacAddress({
             ...machineData,
             mac_addresses: macAddresses
@@ -3581,7 +3982,7 @@ export default {
             hostname: machineData.hostname,
             status: getStatusName(machineData.status_name || machineData.status),
             status_message: machineData.status_message,
-            ip_addresses: machineData.ip_addresses || [],
+            ip_addresses: normalizedIps,
             mac_addresses: macAddresses,
             architecture: machineData.architecture,
             cpu_count: machineData.cpu_count || 0,
@@ -3624,15 +4025,32 @@ export default {
       }
     })
     
-    // 외부 클릭 시 Power 메뉴 및 Status Select 메뉴 닫기
+    // 외부 클릭 시 Power 메뉴, Status Select 메뉴, Action Bar 메뉴 닫기
     const handleClickOutside = (event) => {
+      // Power 메뉴 (개별 머신)
       if (!event.target.closest('.power-container') && !event.target.closest('.power-dropdown-menu')) {
         openPowerMenu.value = null
         powerMenuPosition.value = { top: 0, left: 0 }
       }
+      // Status Select 메뉴
       if (!event.target.closest('.select-all-container') && !event.target.closest('.status-select-dropdown-menu')) {
         openStatusSelectMenu.value = false
         statusSelectMenuPosition.value = { top: 0, left: 0 }
+      }
+      // Action Bar - Actions 메뉴
+      const clickedElement = event.target
+      const isActionsItem = clickedElement.closest('.action-bar-actions-item') !== null
+      const isActionsMenu = clickedElement.closest('.action-bar-dropdown-menu') !== null && openActionsMenu.value
+      if (!isActionsItem && !isActionsMenu) {
+        openActionsMenu.value = false
+        actionsMenuPosition.value = { top: 0, left: 0 }
+      }
+      // Action Bar - Power 메뉴
+      const isPowerItem = clickedElement.closest('.action-bar-power-item') !== null
+      const isPowerMenu = clickedElement.closest('.action-bar-dropdown-menu') !== null && openPowerActionMenu.value
+      if (!isPowerItem && !isPowerMenu) {
+        openPowerActionMenu.value = false
+        powerActionMenuPosition.value = { top: 0, left: 0 }
       }
     }
     
@@ -3666,6 +4084,11 @@ export default {
         formatMemory,
         formatStorage,
         extractMacAddresses,
+        extractIpAddresses,
+        normalizeIpAddresses,
+        normalizeMacAddresses,
+        getFirstMacAddress,
+        getFirstIpAddress,
         getStatusText,
         isStatusInProgress,
         toggleSelectAll,
@@ -3730,6 +4153,17 @@ export default {
         canBulkRelease,
         canBulkAbort,
         abortMachine,
+        // Confirmation & Alert Modals
+        showConfirmModal,
+        confirmModalTitle,
+        confirmModalMessage,
+        confirmModalButtonText,
+        confirmAction,
+        cancelConfirm,
+        showAlertModal,
+        alertModalTitle,
+        alertModalMessage,
+        closeAlert,
         // Network Modal
         showNetworkModalState,
         selectedMachine,
@@ -3939,6 +4373,9 @@ export default {
   font-size: 0.875rem;
   color: #6c757d;
   font-weight: 500;
+  min-width: 120px;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .action-bar-dropdown-menu {
@@ -4098,6 +4535,9 @@ export default {
   font-size: 0.7rem;
   color: #6c757d;
   margin-top: 0.2rem;
+  min-height: 2.2rem; /* MAC과 IP 두 줄을 위한 최소 높이 */
+  display: flex;
+  flex-direction: column;
 }
 
 .mac-address, .ip-address {
@@ -4106,6 +4546,8 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-height: 1rem; /* 각 항목의 최소 높이 */
+  line-height: 1rem; /* 텍스트가 없어도 공간 유지 */
 }
 
 .power-container {
@@ -4708,6 +5150,48 @@ export default {
 
 .btn-secondary:hover {
   background-color: #545b62;
+}
+
+/* Confirmation & Alert Modal Styles */
+.confirm-modal-content,
+.alert-modal-content {
+  max-width: 500px;
+  width: 90%;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.confirm-modal-body,
+.alert-modal-body {
+  padding: 1.5rem;
+}
+
+.confirm-message,
+.alert-message {
+  margin: 0;
+  color: #495057;
+  font-size: 1rem;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e9ecef;
+}
+
+.confirm-modal-footer,
+.alert-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e9ecef;
 }
 
 /* Network Modal Styles */

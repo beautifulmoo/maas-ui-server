@@ -670,7 +670,12 @@ public class MaasApiService {
         
         // Form-data로 전송
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
-        formData.add("vlan", vlanId);
+        // vlanId가 빈 문자열이거나 null이면 vlan=""로 설정하여 VLAN 삭제
+        if (vlanId == null || vlanId.trim().isEmpty()) {
+            formData.add("vlan", "");
+        } else {
+            formData.add("vlan", vlanId);
+        }
         
         return webClient.put()
                 .uri(url)

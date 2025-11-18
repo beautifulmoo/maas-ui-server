@@ -237,6 +237,47 @@ MachinesTab.vue (실시간 UI 업데이트)
   - API 호출 실패 시 에러 메시지 표시
   - 빈 결과 처리
 
+#### 기능명: IP 주소 및 MAC 주소 처리 개선
+- **설명**: 머신의 IP 주소와 MAC 주소를 안전하게 추출, 정규화, 표시하는 기능을 개선했습니다.
+- **주요 개선 사항**:
+  - **IP 주소 추출 (`extractIpAddresses`)**: `interface_set`과 `boot_interface`의 `links` 배열에서 IP 주소를 추출
+  - **IP 주소 정규화 (`normalizeIpAddresses`)**: 다양한 형식(배열, JSON 문자열, 객체)의 IP 주소 데이터를 배열로 정규화
+  - **MAC 주소 정규화 (`normalizeMacAddresses`)**: 다양한 형식의 MAC 주소 데이터를 배열로 정규화
+  - **안전한 표시 함수 (`getFirstIpAddress`, `getFirstMacAddress`)**: 첫 번째 IP/MAC 주소를 안전하게 가져와서 표시
+- **검색 기능 개선**:
+  - 검색 시 IP 주소와 MAC 주소를 정규화하여 검색 정확도 향상
+  - 다양한 데이터 형식에서도 검색 가능
+- **주요 코드 파일**:
+  - `MachinesTab.vue`:
+    - `extractIpAddresses()`: interface_set과 boot_interface에서 IP 주소 추출
+    - `normalizeIpAddresses()`: IP 주소 데이터 정규화
+    - `normalizeMacAddresses()`: MAC 주소 데이터 정규화
+    - `getFirstIpAddress()`: 첫 번째 IP 주소 안전하게 반환
+    - `getFirstMacAddress()`: 첫 번째 MAC 주소 안전하게 반환
+
+#### 기능명: 커스텀 모달 (Custom Modal)
+- **설명**: 브라우저 기본 `window.confirm()`과 `window.alert()`를 대체하는 커스텀 모달 컴포넌트입니다.
+- **주요 기능**:
+  - **Confirmation Modal**: 사용자 확인을 받는 모달 (확인/취소 버튼)
+  - **Alert Modal**: 정보를 표시하는 모달 (확인 버튼만)
+- **사용 사례**:
+  - 재커미셔닝 확인 메시지
+  - Release 확인 메시지
+  - 일괄 작업 확인 메시지
+  - 삭제 확인 메시지
+  - 에러 알림 메시지
+- **주요 코드 파일**:
+  - `MachinesTab.vue`:
+    - `customConfirm()`: Promise 기반 확인 모달 표시
+    - `customAlert()`: Promise 기반 알림 모달 표시
+    - `showConfirmModal`, `confirmModalTitle`, `confirmModalMessage`, `confirmModalButtonText`
+    - `showAlertModal`, `alertModalTitle`, `alertModalMessage`
+    - `confirmAction()`, `cancelConfirm()`, `closeAlert()`
+- **UI/UX 특징**:
+  - 모달 오버레이 클릭 시 닫힘 (Alert는 확인 버튼만)
+  - Teleport를 사용하여 body에 렌더링
+  - 일관된 디자인 스타일
+
 #### 기능명: 상태별 머신 선택 (Status-based Machine Selection)
 - **설명**: 머신 테이블의 전체 선택 체크박스 옆에 드롭다운 메뉴를 제공하여, 머신 상태별로 일괄 선택/해제 기능을 제공합니다. 진행 중인 상태(Commissioning, Deploying, Disk Erasing 등)는 제외하고, 멈춰 있는 상태(New, Ready, Allocated, Deployed, Failed 등)만 선택 가능합니다.
 - **입력**: 
@@ -456,6 +497,8 @@ MachinesTab.vue (실시간 UI 업데이트)
   - API 오류 메시지 표시
 - **특수 기능**:
   - **Fabric-VLAN-Subnet 계층 구조**: Fabric 선택 시 해당 Fabric에 속한 VLAN과 Subnet만 표시
+  - **Fabric Disconnect 기능**: "Disconnect" 옵션 선택 시 인터페이스의 VLAN 연결을 제거 (vlan=""로 설정)
+  - **조건부 필드 표시**: IP Assignment Mode 및 관련 필드(IP 주소, Secondary IP 등)는 Fabric이 선택된 경우에만 표시
   - **Secondary IP 관리**: 여러 개의 Secondary IP 주소를 동적으로 추가/제거 가능
   - **IP 주소 자동 완성**: Subnet CIDR 기반으로 네트워크 프리픽스 자동 제안
 
@@ -621,6 +664,7 @@ MachinesTab.vue (실시간 UI 업데이트)
 | **Failed** (deployment 제외) | 녹색 (`btn-success`) | "Commission" | 활성화 | 커미셔닝 재시도 |
 | **Failed Deployment** | - | - | - | Release 버튼 표시 (Commission 버튼 대신) |
 | **Failed Disk Erasing** | - | - | - | Release 버튼 표시 (Commission 버튼 대신) |
+| **Deployed** | 연한 녹색 (`btn-success-light`) | "Commission" | 활성화 | 재커미셔닝 (확인 메시지 표시), 또는 Release 버튼 표시 |
 | **Deploying** | 회색 (`btn-secondary`) | "Commission" | 비활성화 | 사용 불가 |
 | **Disk Erasing** | 회색 (`btn-secondary`) | "Commission" | 비활성화 | 사용 불가 |
 
@@ -669,10 +713,11 @@ MachinesTab.vue (실시간 UI 업데이트)
 |---------|---------|---------|-----------|------|
 | **Failed Deployment** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
 | **Failed Disk Erasing** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
+| **Deployed** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
 | **그 외 모든 상태** | 숨김 | - | - | Commission 버튼이 표시됨 |
 
 **특수 동작**:
-- Failed Deployment 또는 Failed Disk Erasing 상태에서만 Release 버튼이 Commission 버튼 대신 표시됨
+- Failed Deployment, Failed Disk Erasing, 또는 Deployed 상태에서 Release 버튼이 Commission 버튼 대신 표시됨
 - Release 후 머신 상태는 "New"로 변경됨
 
 #### 버튼 상태 전환 흐름
@@ -1112,7 +1157,8 @@ public class MaasController {
 ```
 
 ##### PUT /api/machines/{systemId}/interfaces/{interfaceId}/vlan
-- **설명**: 인터페이스의 VLAN 업데이트
+- **설명**: 인터페이스의 VLAN 업데이트 또는 삭제
+- **VLAN 삭제**: vlanId가 빈 문자열이거나 null이면 vlan=""로 설정하여 VLAN 연결 제거
 - **요청 파라미터**:
   - `maasUrl` (필수): MAAS 서버 URL
   - `apiKey` (필수): API 키
