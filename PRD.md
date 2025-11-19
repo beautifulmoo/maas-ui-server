@@ -237,14 +237,14 @@ MachinesTab.vue (실시간 UI 업데이트)
   - API 호출 실패 시 에러 메시지 표시
   - 빈 결과 처리
 
-#### 기능명: IP 주소 및 MAC 주소 처리 개선
-- **설명**: 머신의 IP 주소와 MAC 주소를 안전하게 추출, 정규화, 표시하는 기능을 개선했습니다.
-- **주요 개선 사항**:
+#### 기능명: IP 주소 및 MAC 주소 처리
+- **설명**: 머신의 IP 주소와 MAC 주소를 안전하게 추출, 정규화, 표시하는 기능입니다.
+- **주요 기능**:
   - **IP 주소 추출 (`extractIpAddresses`)**: `interface_set`과 `boot_interface`의 `links` 배열에서 IP 주소를 추출
   - **IP 주소 정규화 (`normalizeIpAddresses`)**: 다양한 형식(배열, JSON 문자열, 객체)의 IP 주소 데이터를 배열로 정규화
   - **MAC 주소 정규화 (`normalizeMacAddresses`)**: 다양한 형식의 MAC 주소 데이터를 배열로 정규화
   - **안전한 표시 함수 (`getFirstIpAddress`, `getFirstMacAddress`)**: 첫 번째 IP/MAC 주소를 안전하게 가져와서 표시
-- **검색 기능 개선**:
+- **검색 기능**:
   - 검색 시 IP 주소와 MAC 주소를 정규화하여 검색 정확도 향상
   - 다양한 데이터 형식에서도 검색 가능
 - **주요 코드 파일**:
@@ -369,7 +369,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **Commission**: 선택된 머신 중 Commission 가능한 머신만 처리 (`canCommission()` 체크)
   - **Allocate**: 현재 API 미구현으로 항상 비활성화
   - **Deploy**: Ready 또는 Allocated 상태인 머신만 처리
-  - **Release**: Failed Deployment 또는 Failed Disk Erasing 상태인 머신만 처리
+  - **Release**: Failed Deployment, Failed Disk Erasing, Deployed, 또는 Allocated 상태인 머신만 처리
   - **Abort**: Commissioning 또는 Deploying 상태인 머신만 처리
   - **Delete**: 모든 선택된 머신에 대해 삭제 수행 (상태 무관)
 - **백엔드 API**:
@@ -384,6 +384,15 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 비활성화된 액션은 회색으로 표시되고 클릭 불가
   - 선택된 머신 수는 액션 바 오른쪽에 표시
   - 외부 클릭 시 드롭다운 메뉴 자동 닫힘
+  - **고정 크기 및 레이아웃 안정성**:
+    - 액션 바의 크기는 선택된 머신 수에 관계없이 고정되어 레이아웃 흔들림을 방지합니다.
+    - 선택된 머신 수 표시 영역(`action-bar-selected-count`)은 최소 너비 120px로 고정되어 100개 이상의 머신이 선택되어도 크기가 변하지 않습니다.
+    - Actions와 Power 드롭다운 아이콘(v/^)의 너비가 고정되어 아이콘 변경 시에도 액션 바 크기가 변하지 않습니다.
+    - 머신 row의 높이는 MAC/IP 정보가 없어도 일정하게 유지됩니다 (`min-height: 2.2rem`).
+    - MAC/IP 정보가 없는 경우에도 빈 공간을 유지하여 row 높이를 일정하게 유지합니다.
+  - **드롭다운 메뉴 동작**:
+    - Actions와 Power 드롭다운 메뉴는 버튼을 다시 클릭하거나 화면의 다른 부분을 클릭하면 자동으로 닫힙니다.
+    - 외부 클릭 감지 로직을 통해 사용자 경험을 개선했습니다.
 - **에러 처리**:
   - 일괄 삭제 시 일부 실패해도 성공한 머신은 삭제됨
   - 실패한 머신의 ID와 에러 메시지를 알림으로 표시
@@ -501,6 +510,18 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **조건부 필드 표시**: IP Assignment Mode 및 관련 필드(IP 주소, Secondary IP 등)는 Fabric이 선택된 경우에만 표시
   - **Secondary IP 관리**: 여러 개의 Secondary IP 주소를 동적으로 추가/제거 가능
   - **IP 주소 자동 완성**: Subnet CIDR 기반으로 네트워크 프리픽스 자동 제안
+- **Fabric 변경 및 IP 설정 통합 처리**:
+  - **원래 Fabric ID 저장**: 네트워크 인터페이스 로드 시 `originalFabricId`를 저장하여 Fabric 변경 전 원래 값을 보관합니다.
+  - **Fabric 변경 시 처리 순서**:
+    1. Fabric 변경 감지 시 먼저 원래 fabric ID로 기존 link를 unlink 시도
+    2. unlink 실패해도 계속 진행 (Fabric 변경은 이미 성공했을 수 있고, link가 이미 제거되었을 수 있음)
+    3. 새로운 fabric로 VLAN 업데이트
+    4. Fabric 변경 후 최신 머신 정보를 가져와서 link ID와 subnet 업데이트
+  - **IP Assignment 저장 시 처리**:
+    - Static IP 저장 시 기존 link unlink 실패해도 계속 진행 (link가 이미 제거되었을 수 있음)
+    - Fabric 변경 후 link가 없으면 `originalPrimaryLinkId`를 null로 설정하여 새 link 생성
+  - **에러 처리**: unlink 실패 시 `console.warn`으로 경고만 출력하고 계속 진행하여, Fabric 변경과 IP Assignment 저장이 한 번에 완료되도록 구현되어 있습니다.
+  - **동작**: Fabric 변경과 IP Assignment를 Static으로 설정하고 IP를 입력한 후 Save Changes를 한 번에 실행하면, unlink 실패가 있어도 Fabric 변경과 IP Assignment 저장이 모두 완료되어 2단계 작업이 1단계로 처리됩니다.
 
 #### 기능명: 머신 배포 (Deploy)
 - **설명**: 커미셔닝된 머신에 OS를 배포
@@ -551,7 +572,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 메뉴 위치 계산 실패 시 메뉴 닫기
 
 #### 기능명: 머신 릴리스 (Release)
-- **설명**: 배포 실패한 머신을 릴리스하여 다시 사용 가능한 상태로 변경
+- **설명**: 배포 실패한 머신, 배포된 머신, 또는 할당된 머신을 릴리스하여 다시 사용 가능한 상태로 변경
 - **입력**: System ID
 - **출력**: 릴리스 결과
 - **주요 코드 파일**:
@@ -559,11 +580,17 @@ MachinesTab.vue (실시간 UI 업데이트)
   - `MaasController.releaseMachine()`: API 엔드포인트
   - `MaasApiService.releaseMachine()`: MAAS API 호출
 - **내부 로직 흐름**:
-  1. Failed Deployment 또는 Failed Disk Erasing 상태의 머신에서 "Release" 버튼 클릭
-  2. 백엔드 `/api/machines/{systemId}/release` POST 요청
-  3. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-release` POST 요청 (force=true)
-  4. 성공 시 머신 상태가 "New"로 변경
+  1. Failed Deployment, Failed Disk Erasing, Deployed, 또는 Allocated 상태의 머신에서 "Release" 버튼 클릭
+  2. 확인 메시지 표시 (개별 Release 버튼 클릭 시)
+  3. 백엔드 `/api/machines/{systemId}/release` POST 요청
+  4. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-release` POST 요청 (force=true)
+  5. 성공 시 머신 상태가 "New"로 변경
 - **에러 처리**: API 오류 메시지 표시
+- **사용 가능한 상태**:
+  - **Failed Deployment**: 배포 실패한 머신을 릴리스
+  - **Failed Disk Erasing**: 디스크 지우기 실패한 머신을 릴리스
+  - **Deployed**: 배포된 머신을 릴리스
+  - **Allocated**: 할당된 머신을 릴리스
 
 #### 기능명: Block Devices 조회
 - **설명**: 머신의 블록 디바이스(디스크) 정보 조회 및 스토리지 계산
@@ -714,10 +741,11 @@ MachinesTab.vue (실시간 UI 업데이트)
 | **Failed Deployment** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
 | **Failed Disk Erasing** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
 | **Deployed** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
+| **Allocated** | 표시 | Release 스타일 (`btn-release`) | 릴리스 중이면 비활성화 | 머신 릴리스 (force=true) |
 | **그 외 모든 상태** | 숨김 | - | - | Commission 버튼이 표시됨 |
 
 **특수 동작**:
-- Failed Deployment, Failed Disk Erasing, 또는 Deployed 상태에서 Release 버튼이 Commission 버튼 대신 표시됨
+- Failed Deployment, Failed Disk Erasing, Deployed, 또는 Allocated 상태에서 Release 버튼이 Commission 버튼 대신 표시됨
 - Release 후 머신 상태는 "New"로 변경됨
 
 #### 버튼 상태 전환 흐름
@@ -886,6 +914,30 @@ public class MaasController {
 - **주요 메서드**:
   - `generateAuthHeader(apiKey)`: OAuth 헤더 생성
   - `isValidApiKey(apiKey)`: API 키 형식 검증
+- **OAuth 1.0 인증 헤더 구현 상세**:
+  - **OAuth 버전**: 1.0
+  - **서명 방식**: PLAINTEXT
+  - **API 키 형식**: `consumer_key:token:token_secret` (콜론으로 구분된 3개 파트)
+  - **헤더 생성 과정**:
+    1. API 키 파싱: 콜론(`:`)으로 분리하여 `consumerKey`, `token`, `tokenSecret` 추출
+    2. Nonce 생성: UUID v4를 사용하여 매 요청마다 고유한 nonce 생성
+    3. Timestamp 생성: 현재 시간을 초 단위로 변환 (`System.currentTimeMillis() / 1000`)
+    4. 서명 생성: PLAINTEXT 방식으로 `"&" + tokenSecret` 형식의 서명 생성
+    5. 헤더 문자열 생성: 다음 형식으로 OAuth 헤더 생성
+       ```
+       OAuth oauth_version="1.0", 
+            oauth_signature_method="PLAINTEXT", 
+            oauth_consumer_key="{consumerKey}", 
+            oauth_token="{token}", 
+            oauth_signature="&{tokenSecret}", 
+            oauth_nonce="{nonce}", 
+            oauth_timestamp="{timestamp}"
+       ```
+  - **에러 처리**:
+    - API 키가 null이거나 빈 문자열인 경우: `IllegalArgumentException` 발생
+    - API 키 형식이 올바르지 않은 경우 (3개 파트가 아닌 경우): `IllegalArgumentException` 발생
+  - **사용 위치**: 모든 MAAS REST API 호출 시 `Authorization` 헤더에 포함
+    - 예: `webClient.get().header("Authorization", authHeader)`
 
 ##### MaasWebSocketService
 - **역할**: MAAS WebSocket 서버 연결 및 메시지 중계
@@ -1329,6 +1381,11 @@ public class MaasController {
 #### REST API 통신
 - **프로토콜**: HTTP/HTTPS
 - **인증**: OAuth 1.0 (Authorization 헤더)
+  - **인증 헤더 형식**: `OAuth oauth_version="1.0", oauth_signature_method="PLAINTEXT", oauth_consumer_key="...", oauth_token="...", oauth_signature="&...", oauth_nonce="...", oauth_timestamp="..."`
+  - **서명 방식**: PLAINTEXT (consumer secret과 token secret을 `&`로 연결)
+  - **Nonce**: 매 요청마다 UUID v4로 생성되는 고유 값
+  - **Timestamp**: 요청 시점의 Unix timestamp (초 단위)
+  - **API 키 형식**: `consumer_key:token:token_secret` (Settings에서 입력)
 - **데이터 형식**: JSON
 - **에러 처리**: HTTP 상태 코드 및 JSON 에러 메시지
 

@@ -231,8 +231,8 @@
           <span :class="['status-badge', machine.status]">
                   {{ getStatusText(machine.status) }}
           </span>
-                <div v-if="machine.status_message && isStatusInProgress(machine.status)" class="status-message">
-                  {{ machine.status_message }}
+                <div v-if="machine.status_message && (isStatusInProgress(machine.status) || machine.status?.toLowerCase() === 'deployed')" class="status-message">
+                  {{ getStatusMessage(machine) }}
                 </div>
               </div>
             </td>
@@ -268,16 +268,16 @@
             </td>
                    <td class="actions-col">
                      <div class="action-buttons">
-                       <!-- Failed Deployment 또는 Deployed 상태일 때는 Release 버튼 표시 -->
-                       <button 
-                         v-if="isFailedDeployment(machine.status) || machine.status?.toLowerCase() === 'deployed'"
-                         class="btn-small btn-release"
-                         @click="releaseMachine(machine)"
-                         :disabled="releasingMachines.includes(machine.id)"
-                       >
-                         <span v-if="releasingMachines.includes(machine.id)">...</span>
-                         <span v-else>Release</span>
-                       </button>
+                      <!-- Failed Deployment, Deployed, 또는 Allocated 상태일 때는 Release 버튼 표시 -->
+                      <button 
+                        v-if="isFailedDeployment(machine.status) || machine.status?.toLowerCase() === 'deployed' || machine.status?.toLowerCase() === 'allocated'"
+                        class="btn-small btn-release"
+                        @click="releaseMachine(machine)"
+                        :disabled="releasingMachines.includes(machine.id)"
+                      >
+                        <span v-if="releasingMachines.includes(machine.id)">...</span>
+                        <span v-else>Release</span>
+                      </button>
                        <!-- 그 외 상태에서는 Commission 버튼 표시 -->
                        <button 
                          v-else
@@ -999,6 +999,8 @@ export default {
               hostname: machineData.hostname,
               status: getStatusName(machineData.status_name || machineData.status),
               status_message: machineData.status_message,
+              osystem: machineData.osystem || machines.value[machineIndex].osystem,
+              distro_series: machineData.distro_series || machines.value[machineIndex].distro_series,
               ip_addresses: normalizedIps,
               mac_addresses: macAddresses,
               architecture: machineData.architecture,
@@ -1097,6 +1099,8 @@ export default {
               hostname: machine.hostname,
               status: getStatusName(machine.status_name || machine.status),
               status_message: machine.status_message,
+              osystem: machine.osystem, // OS 이름 (예: 'ubuntu')
+              distro_series: machine.distro_series, // 배포판 시리즈 (예: 'noble', 'jammy')
               ip_addresses: normalizedIps,
               mac_addresses: macAddresses,
               architecture: machine.architecture,
@@ -1454,6 +1458,39 @@ export default {
       // 또는 "erasing"으로 끝나는지 확인 (예: "disk erasing")
       const normalizedStatus = status.toLowerCase().trim()
       return normalizedStatus.endsWith('ing') || normalizedStatus.endsWith('erasing')
+    }
+    
+    // distro_series를 Ubuntu 버전으로 변환하는 함수
+    const getUbuntuVersionFromDistroSeries = (distroSeries) => {
+      const distroSeriesMap = {
+        'xenial': '16.04 LTS',
+        'bionic': '18.04 LTS',
+        'focal': '20.04 LTS',
+        'jammy': '22.04 LTS',
+        'noble': '24.04 LTS'
+      }
+      
+      if (!distroSeries || typeof distroSeries !== 'string') {
+        return null
+      }
+      
+      return distroSeriesMap[distroSeries.toLowerCase()] || null
+    }
+    
+    // Status message를 가져오는 함수 (Deployed 상태일 때 OS 버전 표시)
+    const getStatusMessage = (machine) => {
+      const status = machine.status?.toLowerCase() || ''
+      
+      // Deployed 상태이고 Ubuntu인 경우 OS 버전 표시
+      if (status === 'deployed' && machine.osystem?.toLowerCase() === 'ubuntu') {
+        const ubuntuVersion = getUbuntuVersionFromDistroSeries(machine.distro_series)
+        if (ubuntuVersion) {
+          return `Ubuntu ${ubuntuVersion}`
+        }
+      }
+      
+      // 그 외의 경우 기존 status_message 반환
+      return machine.status_message || ''
     }
     
     // 멈춰 있는 상태 목록 (진행 중 상태 제외)
@@ -2148,8 +2185,10 @@ export default {
         actions.push('commission')
       } else if (status === 'commissioning') {
         actions.push('abort')
-      } else if (status === 'ready' || status === 'allocated') {
+      } else if (status === 'ready') {
         actions.push('commission', 'deploy')
+      } else if (status === 'allocated') {
+        actions.push('commission', 'deploy', 'release')
       } else if (status === 'deployed') {
         actions.push('release')
       } else if (isFailedDeployment(status)) {
@@ -2253,7 +2292,7 @@ export default {
               break
             case 'release':
               const releaseStatus = machine.status?.toLowerCase() || ''
-              if (releaseStatus === 'failed deployment' || releaseStatus === 'failed disk erasing' || releaseStatus === 'deployed') {
+              if (releaseStatus === 'failed deployment' || releaseStatus === 'failed disk erasing' || releaseStatus === 'deployed' || releaseStatus === 'allocated') {
                 // 일괄 작업에서는 이미 확인했으므로 skipConfirm = true
                 await releaseMachine(machine, true)
               }
@@ -3953,6 +3992,8 @@ export default {
               ...machines.value[machineIndex],
               status: newStatus,
               status_message: machineData.status_message,
+              osystem: machineData.osystem || machines.value[machineIndex].osystem,
+              distro_series: machineData.distro_series || machines.value[machineIndex].distro_series,
               power_state: machineData.power_state,
               power_type: machineData.power_type || machines.value[machineIndex].power_type || 'Manual',
               hostname: machineData.hostname,
@@ -3982,6 +4023,8 @@ export default {
             hostname: machineData.hostname,
             status: getStatusName(machineData.status_name || machineData.status),
             status_message: machineData.status_message,
+            osystem: machineData.osystem, // OS 이름 (예: 'ubuntu')
+            distro_series: machineData.distro_series, // 배포판 시리즈 (예: 'noble', 'jammy')
             ip_addresses: normalizedIps,
             mac_addresses: macAddresses,
             architecture: machineData.architecture,
@@ -4091,6 +4134,7 @@ export default {
         getFirstIpAddress,
         getStatusText,
         isStatusInProgress,
+        getStatusMessage,
         toggleSelectAll,
         // Status Select Menu
         openStatusSelectMenu,
