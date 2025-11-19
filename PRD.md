@@ -592,6 +592,89 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **Deployed**: 배포된 머신을 릴리스
   - **Allocated**: 할당된 머신을 릴리스
 
+#### 기능명: 머신 상세 정보 조회 (Machine Details View)
+- **설명**: 머신의 상세 정보를 탭 구조로 표시하는 모달 팝업
+- **입력**: 
+  - FQDN 컬럼의 호스트명 클릭
+  - System ID
+- **출력**: 머신 상세 정보 모달 (5개 탭)
+  - **Overview 탭**: 기본 정보
+    - Status (상태 배지 및 상태 메시지)
+    - System ID
+    - Hostname
+    - Owner
+    - Tags (태그 목록)
+    - Pool
+    - Zone
+    - Description (있는 경우)
+  - **Hardware 탭**: 하드웨어 정보
+    - CPU Architecture
+    - CPU Cores
+    - Memory (포맷팅된 크기)
+    - Total Storage (Block Devices에서 계산)
+    - Disk Count
+    - Power State
+    - Power Type
+    - Block Devices 테이블 (Name, Type, Size, Model)
+  - **Network 탭**: 네트워크 인터페이스 상세 정보
+    - 각 인터페이스별 정보:
+      - Interface ID
+      - MAC Address
+      - Fabric
+      - VLAN
+      - IP Addresses (Primary 및 Secondary)
+      - Link Speed
+  - **Operating System 탭**: OS 정보
+    - Operating System
+    - Distro Series
+    - OS Version (Ubuntu의 경우 버전 매핑 표시, 예: "Ubuntu 24.04 LTS")
+    - HWE Kernel
+    - Deployment Status
+  - **Events 탭**: 이벤트 히스토리
+    - 현재 상태 정보를 이벤트 형태로 표시
+    - 향후 MAAS API로 상세 이벤트 로그 추가 가능
+- **백엔드 API**:
+  - **GET `/api/machines/{systemId}`**: 머신 상세 정보 조회
+    - 요청 파라미터: `maasUrl`, `apiKey`
+    - 응답: 머신의 전체 정보 (interface_set, osystem, distro_series 등 포함)
+  - **GET `/api/machines/{systemId}/block-devices`**: Block Devices 정보 조회
+    - 요청 파라미터: `maasUrl`, `apiKey`
+    - 응답: Block Devices 목록 (`results` 또는 `blockdevice_set` 필드)
+- **주요 코드 파일**:
+  - `MachinesTab.vue`: 
+    - `showMachineDetails()`: 머신 상세 정보 모달 열기
+    - `closeMachineDetailsModal()`: 모달 닫기
+    - `getUbuntuVersionFromDistroSeries()`: distro_series를 Ubuntu 버전으로 변환
+    - `calculateStorageFromBlockDevices()`: Block Devices에서 총 스토리지 계산
+    - `formatMemoryBytes()`: 메모리 포맷팅 (bytes → KB/MB/GB/TB)
+    - 탭 전환 로직 (`activeDetailsTab`)
+  - `MaasController.getMachine()`: 머신 상세 정보 API 엔드포인트
+  - `MaasController.getMachineBlockDevices()`: Block Devices API 엔드포인트
+  - `MaasApiService.getMachine()`: MAAS API 호출
+  - `MaasApiService.getMachineBlockDevices()`: Block Devices API 호출
+- **내부 로직 흐름**:
+  1. FQDN 컬럼의 호스트명 클릭
+  2. 머신 상세 정보 모달 열기 (기본적으로 Overview 탭 표시)
+  3. 백엔드 `/api/machines/{systemId}` GET 요청으로 머신 상세 정보 로드
+  4. 백엔드 `/api/machines/{systemId}/block-devices` GET 요청으로 Block Devices 정보 로드
+  5. 탭 전환 시 해당 탭의 정보 표시
+  6. 모달 헤더 드래그로 위치 이동 가능 (브라우저 영역 내에서만)
+- **UI/UX 특징**:
+  - 모달 헤더를 드래그하여 브라우저 영역 내에서 위치 이동 가능
+  - 탭 구조로 정보를 체계적으로 분류
+  - 로딩 상태 및 에러 처리
+  - 반응형 디자인 (모바일 대응)
+  - OS 버전 표시: Ubuntu의 경우 distro_series를 버전으로 변환하여 표시
+    - xenial → 16.04 LTS
+    - bionic → 18.04 LTS
+    - focal → 20.04 LTS
+    - jammy → 22.04 LTS
+    - noble → 24.04 LTS
+- **에러 처리**: API 오류 시 에러 메시지 표시
+- **성능 최적화**:
+  - Block Devices 정보는 별도 API로 비동기 로드
+  - Block Devices 로드 실패 시에도 기본 정보는 표시
+
 #### 기능명: Block Devices 조회
 - **설명**: 머신의 블록 디바이스(디스크) 정보 조회 및 스토리지 계산
 - **입력**: System ID
@@ -733,6 +816,9 @@ MachinesTab.vue (실시간 UI 업데이트)
 **특수 동작**:
 - **Abort 중**: Deploying 중 Abort 버튼 클릭 시, 중단 요청 처리 중에는 버튼이 비활성화되고 "..." 표시
 - **배포 시작**: Ready 또는 Allocated 상태에서만 배포 가능
+- **OS 버전 표시**: Deployed 상태의 Ubuntu 머신에서 STATUS 메시지에 OS 버전이 표시됨
+  - 예: "Ubuntu 24.04 LTS" (distro_series: noble)
+  - distro_series 매핑: xenial → 16.04 LTS, bionic → 18.04 LTS, focal → 20.04 LTS, jammy → 22.04 LTS, noble → 24.04 LTS
 
 #### Release 버튼 동작
 
@@ -1458,6 +1544,8 @@ maas.default.api-key=consumer_key:token:token_secret
   - 모달:
     - Add Machine 모달
     - Network 설정 모달
+    - Machine Details 모달 (드래그 가능)
+    - Confirm/Alert 모달 (드래그 가능)
 - **스타일**: 
   - 상태별 색상 코딩 (New: 파랑, Commissioning: 노랑, Ready: 초록, Deployed: 회색, Failed: 빨강)
   - 버튼 상태별 색상:
@@ -1520,7 +1608,37 @@ maas.default.api-key=consumer_key:token:token_secret
 3. 버튼이 "Deployed"로 변경
 4. WebSocket을 통한 상태 업데이트 수신
 
-### 5.3 CSS/스타일 프레임워크
+### 5.3 모달 드래그 기능
+- **설명**: 모든 모달 팝업은 헤더를 드래그하여 브라우저 영역 내에서 위치 이동이 가능합니다.
+- **적용 모달**:
+  - **Machine Details 모달**: 머신 상세 정보 표시 모달
+  - **Confirm/Alert 모달**: 확인 및 알림 메시지 모달 (커스텀 모달)
+  - **Network 설정 모달**: 네트워크 설정 변경 모달
+- **동작 방식**:
+  - 모달 헤더에서 마우스를 누르고 드래그하면 모달이 이동
+  - 드래그 중 커서가 `grab` → `grabbing`으로 변경
+  - 모달이 브라우저 뷰포트 경계를 벗어나지 않도록 제한
+  - 모달 닫을 때 위치가 자동으로 초기화됨
+- **기술 구현**:
+  - `mousedown` 이벤트로 드래그 시작
+  - `mousemove` 이벤트로 실시간 위치 업데이트
+  - `mouseup` 이벤트로 드래그 종료
+  - 전역 이벤트 리스너로 모달 밖에서도 드래그 가능
+  - `position: fixed`로 모달 위치 제어
+  - 뷰포트 경계 체크로 모달이 화면 밖으로 나가지 않도록 제한
+- **사용자 경험**:
+  - 드래그 중 텍스트 선택 방지 (`user-select: none`)
+  - 드래그 중 전환 효과 비활성화 (`transition: none`)
+  - 직관적인 드래그 인터페이스
+  - 각 모달은 독립적인 위치 상태 관리
+- **주요 코드 파일**:
+  - `MachinesTab.vue`:
+    - `startDragModal()`, `onDragModal()`, `stopDragModal()`: Machine Details 모달 드래그
+    - `startDragConfirmModal()`, `onDragConfirmModal()`, `stopDragConfirmModal()`: Confirm/Alert 모달 드래그
+    - `startDragNetworkModal()`, `onDragNetworkModal()`, `stopDragNetworkModal()`: Network 모달 드래그
+    - 각 모달별 독립적인 위치 상태 (`modalPosition`, `confirmModalPosition`, `networkModalPosition`)
+
+### 5.4 CSS/스타일 프레임워크
 - **프레임워크**: 커스텀 CSS (프레임워크 미사용)
 - **스타일 방식**: Scoped CSS (Vue 컴포넌트별)
 - **색상 팔레트**:
@@ -1532,7 +1650,7 @@ maas.default.api-key=consumer_key:token:token_secret
   - Background: #f5f5f5 (연한 회색)
   - Card Background: #ffffff (흰색)
 
-### 5.4 주요 시각적 규칙
+### 5.5 주요 시각적 규칙
 
 #### 상태 표시
 - **New**: 파랑 배지
@@ -1540,6 +1658,7 @@ maas.default.api-key=consumer_key:token:token_secret
 - **Ready**: 초록 배지
 - **Allocated**: 초록 배지
 - **Deployed**: 회색 배지 (비활성화)
+  - Ubuntu 머신의 경우 STATUS 메시지에 OS 버전 표시 (예: "Ubuntu 24.04 LTS")
 - **Failed**: 빨강 배지
 
 #### 버튼 상태
@@ -1661,19 +1780,10 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
 ### 7.1 코드 내 TODO 주석
 
 #### MachinesTab.vue
-- **Line 882**: `// TODO: Implement machine details view`
-  - 머신 상세 정보 뷰 구현 필요
 - **Line 887**: `// TODO: Implement machine actions menu`
   - 머신 액션 메뉴 구현 필요
 
 ### 7.2 현재 미완성된 기능
-
-#### 1. 머신 상세 정보 뷰
-- **현재 상태**: 미구현
-- **필요 작업**: 
-  - 머신 클릭 시 상세 정보 모달 또는 페이지 표시
-  - Block devices, 인터페이스 상세 정보 표시
-  - 이벤트 로그 표시
 
 #### 2. 머신 액션 메뉴
 - **현재 상태**: 미구현

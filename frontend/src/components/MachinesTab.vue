@@ -200,7 +200,12 @@
             </td>
             <td class="fqdn-col">
               <div class="machine-name">
-                <strong>{{ machine.hostname || `Machine ${machine.id}` }}</strong>
+                <strong 
+                  @click="showMachineDetails(machine)"
+                  class="machine-hostname-clickable"
+                >
+                  {{ machine.hostname || `Machine ${machine.id}` }}
+                </strong>
                 <div class="machine-details">
                   <span class="mac-address">{{ getFirstMacAddress(machine) }}</span>
                   <span class="ip-address">{{ getFirstIpAddress(machine) }}</span>
@@ -331,8 +336,15 @@
     <!-- Confirmation Modal -->
     <Teleport to="body">
       <div v-if="showConfirmModal" class="modal-overlay" @click.self="cancelConfirm">
-        <div class="modal-content confirm-modal-content">
-          <div class="modal-header">
+        <div 
+          class="modal-content confirm-modal-content"
+          :style="confirmModalPosition.top || confirmModalPosition.left ? { position: 'fixed', top: confirmModalPosition.top + 'px', left: confirmModalPosition.left + 'px', margin: 0 } : {}"
+        >
+          <div 
+            class="modal-header modal-draggable-header"
+            @mousedown="startDragConfirmModal"
+            :style="isDraggingConfirmModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          >
             <h3>{{ confirmModalTitle }}</h3>
           </div>
           <div class="modal-body confirm-modal-body">
@@ -349,8 +361,15 @@
     <!-- Alert Modal -->
     <Teleport to="body">
       <div v-if="showAlertModal" class="modal-overlay" @click.self="closeAlert">
-        <div class="modal-content alert-modal-content">
-          <div class="modal-header">
+        <div 
+          class="modal-content alert-modal-content"
+          :style="confirmModalPosition.top || confirmModalPosition.left ? { position: 'fixed', top: confirmModalPosition.top + 'px', left: confirmModalPosition.left + 'px', margin: 0 } : {}"
+        >
+          <div 
+            class="modal-header modal-draggable-header"
+            @mousedown="startDragConfirmModal"
+            :style="isDraggingConfirmModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          >
             <h3>{{ alertModalTitle }}</h3>
           </div>
           <div class="modal-body alert-modal-body">
@@ -446,8 +465,16 @@
 
     <!-- Network Modal -->
     <div v-if="showNetworkModalState" class="modal-overlay" @click="closeNetworkModal">
-      <div class="modal-content network-modal-content" @click.stop>
-        <div class="modal-header">
+      <div 
+        class="modal-content network-modal-content" 
+        :style="networkModalPosition.top || networkModalPosition.left ? { position: 'fixed', top: networkModalPosition.top + 'px', left: networkModalPosition.left + 'px', margin: 0 } : {}"
+        @click.stop
+      >
+        <div 
+          class="modal-header modal-draggable-header"
+          @mousedown="startDragNetworkModal"
+          :style="isDraggingNetworkModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
           <h3>Network Configuration - {{ selectedMachine?.hostname || selectedMachine?.id }}</h3>
           <button class="close-btn" @click="closeNetworkModal">&times;</button>
         </div>
@@ -638,6 +665,310 @@
               <span v-if="savingNetwork">Saving...</span>
               <span v-else>Save Changes</span>
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Machine Details Modal -->
+    <div v-if="showMachineDetailsModal" class="modal-overlay" @click="closeMachineDetailsModal">
+      <div 
+        class="modal-content machine-details-modal-content" 
+        :style="modalPosition.top || modalPosition.left ? { position: 'fixed', top: modalPosition.top + 'px', left: modalPosition.left + 'px', margin: 0 } : {}"
+        @click.stop
+      >
+        <div 
+          class="modal-header modal-draggable-header"
+          @mousedown="startDragModal"
+          :style="isDraggingModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
+          <h3>Machine Details: {{ selectedMachineForDetails?.hostname || selectedMachineForDetails?.id }}</h3>
+          <button class="close-btn" @click="closeMachineDetailsModal">&times;</button>
+        </div>
+        
+        <div class="machine-details-modal-body">
+          <div v-if="loadingMachineDetails" class="loading">
+            <p>Loading machine details...</p>
+          </div>
+          
+          <div v-else-if="machineDetailsError" class="error">
+            <p>{{ machineDetailsError }}</p>
+          </div>
+          
+          <div v-else-if="machineDetails" class="machine-details-content">
+            <!-- Tabs -->
+            <div class="details-tabs">
+              <button 
+                class="details-tab"
+                :class="{ active: activeDetailsTab === 'overview' }"
+                @click="activeDetailsTab = 'overview'"
+              >
+                Overview
+              </button>
+              <button 
+                class="details-tab"
+                :class="{ active: activeDetailsTab === 'hardware' }"
+                @click="activeDetailsTab = 'hardware'"
+              >
+                Hardware
+              </button>
+              <button 
+                class="details-tab"
+                :class="{ active: activeDetailsTab === 'network' }"
+                @click="activeDetailsTab = 'network'"
+              >
+                Network
+              </button>
+              <button 
+                class="details-tab"
+                :class="{ active: activeDetailsTab === 'os' }"
+                @click="activeDetailsTab = 'os'"
+              >
+                Operating System
+              </button>
+              <button 
+                class="details-tab"
+                :class="{ active: activeDetailsTab === 'events' }"
+                @click="activeDetailsTab = 'events'"
+              >
+                Events
+              </button>
+            </div>
+            
+            <!-- Tab Content -->
+            <div class="details-tab-content">
+              <!-- Overview Tab -->
+              <div v-if="activeDetailsTab === 'overview'" class="details-section">
+                <div class="details-info-grid">
+                  <div class="info-item">
+                    <label>Status</label>
+                    <div>
+                      <span :class="['status-badge', machineDetails.status_name?.toLowerCase() || machineDetails.status]">
+                        {{ getStatusText(machineDetails.status_name || machineDetails.status) }}
+                      </span>
+                      <div v-if="machineDetails.status_message" class="status-message-detail">
+                        {{ getStatusMessage({ status: machineDetails.status_name || machineDetails.status, osystem: machineDetails.osystem, distro_series: machineDetails.distro_series, status_message: machineDetails.status_message }) }}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>System ID</label>
+                    <div>{{ machineDetails.system_id || machineDetails.id || '-' }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Hostname</label>
+                    <div>{{ machineDetails.hostname || '-' }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Owner</label>
+                    <div>{{ machineDetails.owner || '-' }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Tags</label>
+                    <div>
+                      <span v-if="machineDetails.tag_names && machineDetails.tag_names.length > 0">
+                        <span v-for="tag in machineDetails.tag_names" :key="tag" class="tag">{{ tag }}</span>
+                      </span>
+                      <span v-else>-</span>
+                    </div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Pool</label>
+                    <div>{{ machineDetails.pool?.name || 'default' }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Zone</label>
+                    <div>{{ machineDetails.zone?.name || 'default' }}</div>
+                  </div>
+                  
+                  <div class="info-item" v-if="machineDetails.description">
+                    <label>Description</label>
+                    <div>{{ machineDetails.description }}</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Hardware Tab -->
+              <div v-if="activeDetailsTab === 'hardware'" class="details-section">
+                <div class="details-info-grid">
+                  <div class="info-item">
+                    <label>CPU Architecture</label>
+                    <div>{{ machineDetails.architecture || '-' }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>CPU Cores</label>
+                    <div>{{ machineDetails.cpu_count || 0 }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Memory</label>
+                    <div>{{ formatMemoryBytes(machineDetails.memory || 0) }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Total Storage</label>
+                    <div>{{ formatStorage(calculateStorageFromBlockDevices(machineBlockDevices)) }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Disk Count</label>
+                    <div>{{ machineBlockDevices.length || 0 }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Power State</label>
+                    <div>{{ machineDetails.power_state || 'Unknown' }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Power Type</label>
+                    <div>{{ machineDetails.power_type || 'Manual' }}</div>
+                  </div>
+                </div>
+                
+                <!-- Block Devices -->
+                <div v-if="loadingBlockDevices" class="loading">
+                  <p>Loading block devices...</p>
+                </div>
+                <div v-else-if="machineBlockDevices.length > 0" class="block-devices-section">
+                  <h4>Block Devices</h4>
+                  <table class="block-devices-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Size</th>
+                        <th>Model</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="device in machineBlockDevices" :key="device.id">
+                        <td>{{ device.name || '-' }}</td>
+                        <td>{{ device.type || '-' }}</td>
+                        <td>{{ formatStorage(device.size || 0) }}</td>
+                        <td>{{ device.model || '-' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="no-data">
+                  <p>No block devices found.</p>
+                </div>
+              </div>
+              
+              <!-- Network Tab -->
+              <div v-if="activeDetailsTab === 'network'" class="details-section">
+                <div v-if="machineDetails.interface_set && machineDetails.interface_set.length > 0" class="network-interfaces-detail">
+                  <div 
+                    v-for="(iface, index) in machineDetails.interface_set" 
+                    :key="iface.id || index"
+                    class="interface-detail-item"
+                  >
+                    <div class="interface-detail-header">
+                      <h4>{{ iface.name || `Interface ${index + 1}` }}</h4>
+                      <span class="interface-type">{{ iface.type || 'Unknown' }}</span>
+                    </div>
+                    
+                    <div class="interface-detail-info">
+                      <div class="info-row">
+                        <label>Interface ID:</label>
+                        <span>{{ iface.id || '-' }}</span>
+                      </div>
+                      
+                      <div class="info-row">
+                        <label>MAC Address:</label>
+                        <span>{{ iface.mac_address || '-' }}</span>
+                      </div>
+                      
+                      <div class="info-row" v-if="iface.vlan">
+                        <label>Fabric:</label>
+                        <span>{{ iface.vlan.fabric || '-' }}</span>
+                      </div>
+                      
+                      <div class="info-row" v-if="iface.vlan">
+                        <label>VLAN:</label>
+                        <span>{{ iface.vlan.name || iface.vlan.vid || '-' }}</span>
+                      </div>
+                      
+                      <div class="info-row" v-if="iface.links && iface.links.length > 0">
+                        <label>IP Addresses:</label>
+                        <div class="ip-addresses-list">
+                          <div v-for="(link, linkIndex) in iface.links" :key="linkIndex" class="ip-address-item">
+                            <span v-if="link.ip_address">{{ link.ip_address }}</span>
+                            <span v-else class="auto-ip">(AUTO)</span>
+                            <span v-if="link.subnet" class="subnet-info">/ {{ link.subnet.cidr || link.subnet }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div class="info-row" v-if="iface.link_speed">
+                        <label>Link Speed:</label>
+                        <span>{{ iface.link_speed }} Mbps</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="no-data">
+                  <p>No network interfaces found.</p>
+                </div>
+              </div>
+              
+              <!-- OS Tab -->
+              <div v-if="activeDetailsTab === 'os'" class="details-section">
+                <div class="details-info-grid">
+                  <div class="info-item" v-if="machineDetails.osystem">
+                    <label>Operating System</label>
+                    <div>{{ machineDetails.osystem }}</div>
+                  </div>
+                  
+                  <div class="info-item" v-if="machineDetails.distro_series">
+                    <label>Distro Series</label>
+                    <div>{{ machineDetails.distro_series }}</div>
+                  </div>
+                  
+                  <div class="info-item" v-if="machineDetails.osystem === 'ubuntu' && machineDetails.distro_series">
+                    <label>OS Version</label>
+                    <div>{{ getUbuntuVersionFromDistroSeries(machineDetails.distro_series) ? `Ubuntu ${getUbuntuVersionFromDistroSeries(machineDetails.distro_series)}` : '-' }}</div>
+                  </div>
+                  
+                  <div class="info-item" v-if="machineDetails.hwe_kernel">
+                    <label>HWE Kernel</label>
+                    <div>{{ machineDetails.hwe_kernel }}</div>
+                  </div>
+                  
+                  <div class="info-item" v-if="machineDetails.status_name === 'Deployed' || machineDetails.status === 6">
+                    <label>Deployment Status</label>
+                    <div>Deployed</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Events Tab -->
+              <div v-if="activeDetailsTab === 'events'" class="details-section">
+                <div class="events-section">
+                  <div class="events-info">
+                    <p>Event history will be displayed here when available.</p>
+                    <p class="events-note">Note: Detailed event logs can be retrieved from MAAS API if needed.</p>
+                  </div>
+                  
+                  <!-- 현재 상태 정보를 이벤트처럼 표시 -->
+                  <div v-if="machineDetails.status_message" class="event-item">
+                    <div class="event-time">{{ new Date().toLocaleString() }}</div>
+                    <div class="event-content">
+                      <div class="event-status">{{ getStatusText(machineDetails.status_name || machineDetails.status) }}</div>
+                      <div class="event-message">{{ getStatusMessage({ status: machineDetails.status_name || machineDetails.status, osystem: machineDetails.osystem, distro_series: machineDetails.distro_series, status_message: machineDetails.status_message }) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -850,6 +1181,8 @@ export default {
         confirmModalResolve.value(false)
         confirmModalResolve.value = null
       }
+      // Reset modal position when closing
+      confirmModalPosition.value = { top: 0, left: 0 }
     }
     
     // 알림 모달 닫기
@@ -859,6 +1192,8 @@ export default {
         alertModalResolve.value()
         alertModalResolve.value = null
       }
+      // Reset modal position when closing
+      confirmModalPosition.value = { top: 0, left: 0 }
     }
     
     // Power Menu Functions
@@ -915,6 +1250,286 @@ export default {
       openPowerMenu.value = null
       powerMenuPosition.value = { top: 0, left: 0 }
     }
+    
+    // Machine Details Modal
+    const showMachineDetailsModal = ref(false)
+    const selectedMachineForDetails = ref(null)
+    const machineDetails = ref(null)
+    const loadingMachineDetails = ref(false)
+    const machineDetailsError = ref(null)
+    const activeDetailsTab = ref('overview')
+    const machineBlockDevices = ref([])
+    const loadingBlockDevices = ref(false)
+    
+    // Modal drag state
+    const isDraggingModal = ref(false)
+    const modalPosition = ref({ top: 0, left: 0 })
+    const dragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Confirm/Alert Modal drag state
+    const isDraggingConfirmModal = ref(false)
+    const confirmModalPosition = ref({ top: 0, left: 0 })
+    const confirmDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Network Modal drag state
+    const isDraggingNetworkModal = ref(false)
+    const networkModalPosition = ref({ top: 0, left: 0 })
+    const networkDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Machine Details Modal Functions
+    const showMachineDetails = async (machine) => {
+      selectedMachineForDetails.value = machine
+      showMachineDetailsModal.value = true
+      activeDetailsTab.value = 'overview'
+      loadingMachineDetails.value = true
+      machineDetailsError.value = null
+      machineDetails.value = null
+      machineBlockDevices.value = []
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        
+        // 최신 머신 정보 가져오기
+        console.log(`[Machine Details] Fetching details for machine: ${machine.id}`)
+        const machineResponse = await axios.get(`http://localhost:8081/api/machines/${machine.id}`, {
+          params: apiParams
+        })
+        
+        if (machineResponse.data && !machineResponse.data.error) {
+          machineDetails.value = machineResponse.data
+          console.log('[Machine Details] Machine details loaded:', machineDetails.value)
+          
+          // Block Devices 정보도 가져오기
+          loadingBlockDevices.value = true
+          try {
+            const blockDevicesResponse = await axios.get(`http://localhost:8081/api/machines/${machine.id}/block-devices`, {
+              params: apiParams
+            })
+            
+            if (blockDevicesResponse.data && !blockDevicesResponse.data.error) {
+              // API 응답 형식: {results: [...]} 또는 blockdevice_set
+              machineBlockDevices.value = blockDevicesResponse.data.results || blockDevicesResponse.data.blockdevice_set || []
+              console.log('[Machine Details] Block devices loaded:', machineBlockDevices.value)
+            }
+          } catch (err) {
+            console.warn('[Machine Details] Failed to load block devices:', err)
+            machineBlockDevices.value = []
+          } finally {
+            loadingBlockDevices.value = false
+          }
+        } else {
+          machineDetailsError.value = machineResponse.data?.error || 'Failed to load machine details'
+        }
+      } catch (err) {
+        console.error('[Machine Details] Error loading machine details:', err)
+        machineDetailsError.value = err.response?.data?.error || err.message || 'Failed to load machine details'
+      } finally {
+        loadingMachineDetails.value = false
+      }
+    }
+    
+    const closeMachineDetailsModal = () => {
+      showMachineDetailsModal.value = false
+      selectedMachineForDetails.value = null
+      machineDetails.value = null
+      machineDetailsError.value = null
+      machineBlockDevices.value = []
+      activeDetailsTab.value = 'overview'
+      // Reset modal position when closing
+      modalPosition.value = { top: 0, left: 0 }
+    }
+    
+    // Modal drag handlers
+    const startDragModal = (event) => {
+      if (event.button !== 0) return // Only left mouse button
+      isDraggingModal.value = true
+      const modalElement = event.currentTarget.closest('.machine-details-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        dragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        // If modal hasn't been moved yet, center it
+        if (modalPosition.value.top === 0 && modalPosition.value.left === 0) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          modalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragModal = (event) => {
+      if (!isDraggingModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      
+      // Find modal element by querying the DOM
+      const modalElement = document.querySelector('.machine-details-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      // Calculate new position
+      let newLeft = event.clientX - dragStartPosition.value.x
+      let newTop = event.clientY - dragStartPosition.value.y
+      
+      // Constrain to viewport bounds
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      modalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragModal = () => {
+      isDraggingModal.value = false
+    }
+    
+    // Add global mousemove and mouseup listeners when dragging
+    watch(isDraggingModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragModal)
+        document.addEventListener('mouseup', stopDragModal)
+      } else {
+        document.removeEventListener('mousemove', onDragModal)
+        document.removeEventListener('mouseup', stopDragModal)
+      }
+    })
+    
+    // Confirm/Alert Modal drag handlers
+    const startDragConfirmModal = (event) => {
+      if (event.button !== 0) return
+      isDraggingConfirmModal.value = true
+      const modalElement = event.currentTarget.closest('.confirm-modal-content, .alert-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        confirmDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        if (confirmModalPosition.value.top === 0 && confirmModalPosition.value.left === 0) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          confirmModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragConfirmModal = (event) => {
+      if (!isDraggingConfirmModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.confirm-modal-content, .alert-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - confirmDragStartPosition.value.x
+      let newTop = event.clientY - confirmDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      confirmModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragConfirmModal = () => {
+      isDraggingConfirmModal.value = false
+    }
+    
+    watch(isDraggingConfirmModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragConfirmModal)
+        document.addEventListener('mouseup', stopDragConfirmModal)
+      } else {
+        document.removeEventListener('mousemove', onDragConfirmModal)
+        document.removeEventListener('mouseup', stopDragConfirmModal)
+      }
+    })
+    
+    // Network Modal drag handlers
+    const startDragNetworkModal = (event) => {
+      if (event.button !== 0) return
+      isDraggingNetworkModal.value = true
+      const modalElement = event.currentTarget.closest('.network-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        networkDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        if (networkModalPosition.value.top === 0 && networkModalPosition.value.left === 0) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          networkModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragNetworkModal = (event) => {
+      if (!isDraggingNetworkModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.network-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - networkDragStartPosition.value.x
+      let newTop = event.clientY - networkDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      networkModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragNetworkModal = () => {
+      isDraggingNetworkModal.value = false
+    }
+    
+    watch(isDraggingNetworkModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragNetworkModal)
+        document.addEventListener('mouseup', stopDragNetworkModal)
+      } else {
+        document.removeEventListener('mousemove', onDragNetworkModal)
+        document.removeEventListener('mouseup', stopDragNetworkModal)
+      }
+    })
     
     // Network Modal
     const showNetworkModalState = ref(false)
@@ -1492,6 +2107,31 @@ export default {
       // 그 외의 경우 기존 status_message 반환
       return machine.status_message || ''
     }
+    
+    // Block Devices에서 스토리지 계산하는 함수
+    const calculateStorageFromBlockDevices = (blockDevices) => {
+      if (!blockDevices || !Array.isArray(blockDevices)) {
+        return 0
+      }
+      return blockDevices.reduce((total, device) => {
+        return total + (device.size || 0)
+      }, 0)
+    }
+    
+    // 메모리 포맷팅 함수 (bytes 단위)
+    const formatMemoryBytes = (bytes) => {
+      if (!bytes || bytes === 0) return '0 B'
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      let size = bytes
+      let unitIndex = 0
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024
+        unitIndex++
+      }
+      return `${size.toFixed(2)} ${units[unitIndex]}`
+    }
+    
+    // 스토리지 포맷팅 함수 (bytes 단위) - 기존 formatStorage와 동일하지만 명확성을 위해 유지
     
     // 멈춰 있는 상태 목록 (진행 중 상태 제외)
     const availableStatusesForSelection = computed(() => {
@@ -3278,6 +3918,8 @@ export default {
       availableFabrics.value = []
       availableSubnets.value = []
       fabricVlanMap.value = {}
+      // Reset modal position when closing
+      networkModalPosition.value = { top: 0, left: 0 }
     }
     
     const saveNetworkChanges = async () => {
@@ -4135,6 +4777,9 @@ export default {
         getStatusText,
         isStatusInProgress,
         getStatusMessage,
+        getUbuntuVersionFromDistroSeries,
+        calculateStorageFromBlockDevices,
+        formatMemoryBytes,
         toggleSelectAll,
         // Status Select Menu
         openStatusSelectMenu,
@@ -4208,6 +4853,26 @@ export default {
         alertModalTitle,
         alertModalMessage,
         closeAlert,
+        // Machine Details Modal
+        showMachineDetailsModal,
+        selectedMachineForDetails,
+        machineDetails,
+        loadingMachineDetails,
+        machineDetailsError,
+        activeDetailsTab,
+        machineBlockDevices,
+        loadingBlockDevices,
+        showMachineDetails,
+        closeMachineDetailsModal,
+        modalPosition,
+        isDraggingModal,
+        startDragModal,
+        confirmModalPosition,
+        isDraggingConfirmModal,
+        startDragConfirmModal,
+        networkModalPosition,
+        isDraggingNetworkModal,
+        startDragNetworkModal,
         // Network Modal
         showNetworkModalState,
         selectedMachine,
@@ -5201,6 +5866,12 @@ export default {
 .alert-modal-content {
   max-width: 500px;
   width: 90%;
+  transition: none; /* Disable transition during drag */
+}
+
+.confirm-modal-content.dragging,
+.alert-modal-content.dragging {
+  transition: none;
 }
 
 .modal-body {
@@ -5242,6 +5913,11 @@ export default {
 .network-modal-content {
   max-width: 800px;
   max-height: 90vh;
+  transition: none; /* Disable transition during drag */
+}
+
+.network-modal-content.dragging {
+  transition: none;
 }
 
 .network-modal-body {
@@ -5345,6 +6021,301 @@ export default {
 }
 
 .no-interfaces {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+}
+
+/* Machine Details Modal Styles */
+.machine-details-modal-content {
+  max-width: 900px;
+  max-height: 90vh;
+  width: 90%;
+  transition: none; /* Disable transition during drag */
+}
+
+.machine-details-modal-content.dragging {
+  transition: none;
+}
+
+.modal-draggable-header {
+  user-select: none; /* Prevent text selection during drag */
+  cursor: grab;
+}
+
+.modal-draggable-header:active {
+  cursor: grabbing;
+}
+
+.machine-details-modal-body {
+  padding: 0;
+  max-height: calc(90vh - 80px);
+  overflow-y: auto;
+}
+
+.machine-hostname-clickable {
+  cursor: pointer;
+  color: #007bff;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.machine-hostname-clickable:hover {
+  color: #0056b3;
+  text-decoration: underline;
+}
+
+.details-tabs {
+  display: flex;
+  border-bottom: 2px solid #e9ecef;
+  background-color: #f8f9fa;
+  padding: 0 1.5rem;
+}
+
+.details-tab {
+  padding: 1rem 1.5rem;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #6c757d;
+  transition: all 0.2s ease;
+  margin-bottom: -2px;
+}
+
+.details-tab:hover {
+  color: #007bff;
+  background-color: #ffffff;
+}
+
+.details-tab.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+  background-color: #ffffff;
+}
+
+.details-tab-content {
+  padding: 1.5rem;
+}
+
+.details-section {
+  min-height: 300px;
+}
+
+.details-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.info-item label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.info-item > div {
+  color: #212529;
+  font-size: 0.95rem;
+}
+
+.status-message-detail {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #6c757d;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background-color: #e9ecef;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #495057;
+  margin-right: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.block-devices-section {
+  margin-top: 2rem;
+}
+
+.block-devices-section h4 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.block-devices-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.block-devices-table thead {
+  background-color: #f8f9fa;
+}
+
+.block-devices-table th,
+.block-devices-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.block-devices-table th {
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.block-devices-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+.network-interfaces-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.interface-detail-item {
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 1.5rem;
+  background-color: #ffffff;
+}
+
+.interface-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.interface-detail-header h4 {
+  margin: 0;
+  color: #2c3e50;
+}
+
+.interface-type {
+  padding: 0.25rem 0.75rem;
+  background-color: #e9ecef;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #495057;
+}
+
+.interface-detail-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.info-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.info-row label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 120px;
+  font-size: 0.9rem;
+}
+
+.info-row span {
+  color: #212529;
+  font-size: 0.95rem;
+}
+
+.ip-addresses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ip-address-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.auto-ip {
+  color: #6c757d;
+  font-style: italic;
+}
+
+.subnet-info {
+  color: #6c757d;
+  font-size: 0.85rem;
+}
+
+.events-section {
+  padding: 1rem 0;
+}
+
+.events-info {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #007bff;
+}
+
+.events-info p {
+  margin: 0.5rem 0;
+  color: #495057;
+}
+
+.events-note {
+  font-size: 0.85rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+.event-item {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  border-left: 3px solid #007bff;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.event-time {
+  min-width: 150px;
+  font-size: 0.85rem;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+.event-content {
+  flex: 1;
+}
+
+.event-status {
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.25rem;
+}
+
+.event-message {
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.no-data {
   text-align: center;
   padding: 2rem;
   color: #6c757d;
@@ -5488,6 +6459,29 @@ export default {
   .btn-primary,
   .btn-secondary {
     width: 100%;
+  }
+  
+  .details-info-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .details-tabs {
+    flex-wrap: wrap;
+    padding: 0 1rem;
+  }
+  
+  .details-tab {
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+  }
+  
+  .info-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .info-row label {
+    min-width: auto;
   }
 }
 </style>
