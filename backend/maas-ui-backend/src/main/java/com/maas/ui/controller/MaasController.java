@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 import java.util.Map;
+import java.util.HashMap;
 
 @RestController
 @RequestMapping("/api")
@@ -415,6 +416,28 @@ public class MaasController {
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to delete machine")));
+    }
+    
+    /**
+     * MAAS 이벤트를 조회합니다.
+     */
+    @GetMapping("/events/op-query")
+    public Mono<ResponseEntity<Map<String, Object>>> getEvents(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        return maasApiService.getEvents(maasUrl, apiKey)
+                .map(events -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("results", events);
+                    return ResponseEntity.ok(response);
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error fetching events: " + e.getMessage());
+                    e.printStackTrace();
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("error", "Failed to fetch events: " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+                });
     }
     
     /**

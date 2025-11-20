@@ -687,15 +687,7 @@
         </div>
         
         <div class="machine-details-modal-body">
-          <div v-if="loadingMachineDetails" class="loading">
-            <p>Loading machine details...</p>
-          </div>
-          
-          <div v-else-if="machineDetailsError" class="error">
-            <p>{{ machineDetailsError }}</p>
-          </div>
-          
-          <div v-else-if="machineDetails" class="machine-details-content">
+          <div class="machine-details-content">
             <!-- Tabs -->
             <div class="details-tabs">
               <button 
@@ -737,6 +729,22 @@
             
             <!-- Tab Content -->
             <div class="details-tab-content">
+              <!-- Loading State -->
+              <div v-if="loadingMachineDetails" class="details-section">
+                <div class="loading">
+                  <p>Loading machine details...</p>
+                </div>
+              </div>
+              
+              <!-- Error State -->
+              <div v-else-if="machineDetailsError" class="details-section">
+                <div class="error">
+                  <p>{{ machineDetailsError }}</p>
+                </div>
+              </div>
+              
+              <!-- Content when loaded -->
+              <template v-else-if="machineDetails">
               <!-- Overview Tab -->
               <div v-if="activeDetailsTab === 'overview'" class="details-section">
                 <div class="details-info-grid">
@@ -809,17 +817,29 @@
                   
                   <div class="info-item">
                     <label>Memory</label>
-                    <div>{{ formatMemoryBytes(machineDetails.memory || 0) }}</div>
+                    <div>{{ 
+                      selectedMachineForDetails?.memory !== undefined 
+                        ? formatMemory(selectedMachineForDetails.memory) 
+                        : formatMemory(machineDetails?.memory || 0)
+                    }}</div>
                   </div>
                   
                   <div class="info-item">
                     <label>Total Storage</label>
-                    <div>{{ formatStorage(calculateStorageFromBlockDevices(machineBlockDevices)) }}</div>
+                    <div>{{ 
+                      selectedMachineForDetails?.storage 
+                        ? formatStorage(selectedMachineForDetails.storage) 
+                        : formatStorage(calculateStorageFromBlockDevices(machineBlockDevices.length > 0 ? machineBlockDevices : (machineDetails?.blockdevice_set || [])))
+                    }}</div>
                   </div>
                   
                   <div class="info-item">
                     <label>Disk Count</label>
-                    <div>{{ machineBlockDevices.length || 0 }}</div>
+                    <div>{{ 
+                      selectedMachineForDetails?.disk_count !== undefined 
+                        ? selectedMachineForDetails.disk_count 
+                        : (machineBlockDevices.length > 0 ? machineBlockDevices.length : (machineDetails?.blockdevice_set?.length || 0))
+                    }}</div>
                   </div>
                   
                   <div class="info-item">
@@ -864,7 +884,7 @@
               </div>
               
               <!-- Network Tab -->
-              <div v-if="activeDetailsTab === 'network'" class="details-section">
+              <div v-if="activeDetailsTab === 'network'" class="details-section details-section-network">
                 <div v-if="machineDetails.interface_set && machineDetails.interface_set.length > 0" class="network-interfaces-detail">
                   <div 
                     v-for="(iface, index) in machineDetails.interface_set" 
@@ -897,16 +917,19 @@
                         <span>{{ iface.vlan.name || iface.vlan.vid || '-' }}</span>
                       </div>
                       
-                      <div class="info-row" v-if="iface.links && iface.links.length > 0">
-                        <label>IP Addresses:</label>
-                        <div class="ip-addresses-list">
-                          <div v-for="(link, linkIndex) in iface.links" :key="linkIndex" class="ip-address-item">
+                      <template v-if="iface.links && iface.links.length > 0">
+                        <div v-for="(link, linkIndex) in iface.links" :key="linkIndex">
+                          <div class="info-row">
+                            <label>IP Address:</label>
                             <span v-if="link.ip_address">{{ link.ip_address }}</span>
                             <span v-else class="auto-ip">(AUTO)</span>
-                            <span v-if="link.subnet" class="subnet-info">/ {{ link.subnet.cidr || link.subnet }}</span>
+                          </div>
+                          <div v-if="link.subnet" class="info-row">
+                            <label>Subnet:</label>
+                            <span>{{ link.subnet.cidr || link.subnet }}</span>
                           </div>
                         </div>
-                      </div>
+                      </template>
                       
                       <div class="info-row" v-if="iface.link_speed">
                         <label>Link Speed:</label>
@@ -951,23 +974,48 @@
               </div>
               
               <!-- Events Tab -->
-              <div v-if="activeDetailsTab === 'events'" class="details-section">
+              <div v-if="activeDetailsTab === 'events'" class="details-section details-section-events">
                 <div class="events-section">
-                  <div class="events-info">
-                    <p>Event history will be displayed here when available.</p>
-                    <p class="events-note">Note: Detailed event logs can be retrieved from MAAS API if needed.</p>
+                  <div v-if="loadingEvents" class="loading">
+                    <p>Loading events...</p>
                   </div>
                   
-                  <!-- 현재 상태 정보를 이벤트처럼 표시 -->
-                  <div v-if="machineDetails.status_message" class="event-item">
-                    <div class="event-time">{{ new Date().toLocaleString() }}</div>
-                    <div class="event-content">
-                      <div class="event-status">{{ getStatusText(machineDetails.status_name || machineDetails.status) }}</div>
-                      <div class="event-message">{{ getStatusMessage({ status: machineDetails.status_name || machineDetails.status, osystem: machineDetails.osystem, distro_series: machineDetails.distro_series, status_message: machineDetails.status_message }) }}</div>
+                  <div v-else class="events-list">
+                    <!-- 현재 상태 정보를 이벤트처럼 표시 (이벤트가 없거나 최상단에 표시) -->
+                    <div v-if="machineDetails && (machineDetails.status_message || machineDetails.status_name || machineDetails.status)" class="event-item event-item-current-status">
+                      <div class="event-header">
+                        <div class="event-time">{{ new Date().toLocaleString() }}</div>
+                        <div class="event-level event-level-info">CURRENT</div>
+                      </div>
+                      <div class="event-content">
+                        <div class="event-type">{{ getStatusText(machineDetails.status_name || machineDetails.status) }}</div>
+                        <div class="event-description">{{ getStatusMessage({ status: machineDetails.status_name || machineDetails.status, osystem: machineDetails.osystem, distro_series: machineDetails.distro_series, status_message: machineDetails.status_message }) }}</div>
+                      </div>
+                    </div>
+                    
+                    <!-- MAAS 이벤트 목록 -->
+                    <div v-for="event in machineEvents" :key="event.id" class="event-item">
+                      <div class="event-header">
+                        <div class="event-time">{{ event.created || '-' }}</div>
+                        <div class="event-level" :class="'event-level-' + (event.level?.toLowerCase() || 'info')">
+                          {{ event.level || 'INFO' }}
+                        </div>
+                      </div>
+                      <div class="event-content">
+                        <div class="event-type">{{ event.type || '-' }}</div>
+                        <div v-if="event.description" class="event-description">{{ event.description }}</div>
+                        <div v-if="event.username" class="event-username">User: {{ event.username }}</div>
+                      </div>
+                    </div>
+                    
+                    <!-- 이벤트가 없을 때 메시지 -->
+                    <div v-if="machineEvents.length === 0 && (!machineDetails || !machineDetails.status_message)" class="events-info">
+                      <p>No events found for this machine.</p>
                     </div>
                   </div>
                 </div>
               </div>
+              </template>
             </div>
           </div>
         </div>
@@ -1260,6 +1308,8 @@ export default {
     const activeDetailsTab = ref('overview')
     const machineBlockDevices = ref([])
     const loadingBlockDevices = ref(false)
+    const machineEvents = ref([])
+    const loadingEvents = ref(false)
     
     // Modal drag state
     const isDraggingModal = ref(false)
@@ -1317,6 +1367,9 @@ export default {
           } finally {
             loadingBlockDevices.value = false
           }
+          
+          // Events 정보도 가져오기
+          await loadMachineEvents(machine.id)
         } else {
           machineDetailsError.value = machineResponse.data?.error || 'Failed to load machine details'
         }
@@ -1328,12 +1381,70 @@ export default {
       }
     }
     
+    const loadMachineEvents = async (systemId) => {
+      loadingEvents.value = true
+      machineEvents.value = []
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        console.log('[Machine Details] Loading events for systemId:', systemId)
+        const eventsResponse = await axios.get(`http://localhost:8081/api/events/op-query`, {
+          params: apiParams
+        })
+        
+        console.log('[Machine Details] Events API response:', eventsResponse.data)
+        
+        if (eventsResponse.data && !eventsResponse.data.error) {
+          // API 응답이 배열인 경우와 {results: [...]} 형식인 경우 모두 처리
+          let allEvents = []
+          if (Array.isArray(eventsResponse.data)) {
+            allEvents = eventsResponse.data
+          } else if (eventsResponse.data.results && Array.isArray(eventsResponse.data.results)) {
+            allEvents = eventsResponse.data.results
+          }
+          
+          console.log('[Machine Details] Total events received:', allEvents.length)
+          console.log('[Machine Details] Looking for systemId:', systemId)
+          
+          // node 필드가 systemId와 일치하는 이벤트만 필터링
+          const filteredEvents = allEvents.filter(event => {
+            const matches = event.node === systemId
+            if (!matches && allEvents.length < 20) {
+              // 디버깅: 처음 몇 개 이벤트의 node 값 확인
+              console.log('[Machine Details] Event node:', event.node, 'systemId:', systemId, 'match:', matches)
+            }
+            return matches
+          })
+          
+          console.log('[Machine Details] Filtered events count:', filteredEvents.length)
+          
+          // 날짜 순으로 정렬 (created 필드 기준, 최신순)
+          filteredEvents.sort((a, b) => {
+            const dateA = new Date(a.created)
+            const dateB = new Date(b.created)
+            return dateB - dateA // 최신순 (내림차순)
+          })
+          
+          machineEvents.value = filteredEvents
+          console.log('[Machine Details] Events loaded:', machineEvents.value)
+        } else {
+          console.warn('[Machine Details] Events API returned error or no data:', eventsResponse.data)
+        }
+      } catch (err) {
+        console.error('[Machine Details] Failed to load events:', err)
+        machineEvents.value = []
+      } finally {
+        loadingEvents.value = false
+      }
+    }
+    
     const closeMachineDetailsModal = () => {
       showMachineDetailsModal.value = false
       selectedMachineForDetails.value = null
       machineDetails.value = null
       machineDetailsError.value = null
       machineBlockDevices.value = []
+      machineEvents.value = []
       activeDetailsTab.value = 'overview'
       // Reset modal position when closing
       modalPosition.value = { top: 0, left: 0 }
@@ -4862,6 +4973,9 @@ export default {
         activeDetailsTab,
         machineBlockDevices,
         loadingBlockDevices,
+        machineEvents,
+        loadingEvents,
+        loadMachineEvents,
         showMachineDetails,
         closeMachineDetailsModal,
         modalPosition,
@@ -5672,6 +5786,16 @@ export default {
   color: #6c757d;
 }
 
+/* Machine Details Modal 내부의 로딩/에러 상태도 고정 높이 */
+.machine-details-modal-body .loading,
+.machine-details-modal-body .error {
+  min-height: 500px;
+  height: 500px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .error {
   color: #dc3545;
   background-color: #f8d7da;
@@ -6028,9 +6152,9 @@ export default {
 
 /* Machine Details Modal Styles */
 .machine-details-modal-content {
-  max-width: 900px;
+  max-width: 1400px; /* Network 탭에서 여러 인터페이스를 가로로 배치하기 위해 크게 확장 */
   max-height: 90vh;
-  width: 90%;
+  width: 95%; /* 가로 공간 활용 */
   transition: none; /* Disable transition during drag */
 }
 
@@ -6050,7 +6174,21 @@ export default {
 .machine-details-modal-body {
   padding: 0;
   max-height: calc(90vh - 80px);
-  overflow-y: auto;
+  overflow: hidden; /* 스크롤바 제거, 내부 컨텐츠에서만 스크롤 */
+  display: flex;
+  flex-direction: column;
+}
+
+.machine-details-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.details-tabs {
+  flex-shrink: 0; /* 탭이 줄어들지 않도록 */
 }
 
 .machine-hostname-clickable {
@@ -6098,10 +6236,42 @@ export default {
 
 .details-tab-content {
   padding: 1.5rem;
+  min-height: 500px; /* Hardware 탭 크기에 맞춘 고정 높이 */
+  max-height: 500px;
+  overflow: hidden; /* 기본적으로 스크롤바 숨김 */
+  box-sizing: border-box; /* padding 포함한 크기 계산 */
+  display: flex;
+  flex-direction: column;
+  position: relative; /* 스크롤바 위치 계산을 위해 */
 }
 
 .details-section {
-  min-height: 300px;
+  min-height: 500px; /* 모든 탭의 섹션 높이 통일 */
+  height: 500px; /* 고정 높이 */
+  overflow-y: hidden; /* 기본적으로 스크롤바 숨김 */
+  box-sizing: border-box; /* padding 포함한 크기 계산 */
+  flex: 1 1 auto; /* 부모 컨테이너의 남은 공간 채우기 */
+  min-height: 0; /* flex item이 부모보다 작아질 수 있도록 */
+  max-height: 100%; /* 부모 컨테이너를 넘지 않도록 */
+}
+
+/* Network 탭은 인터페이스가 많을 수 있으므로 스크롤 허용 */
+.details-section-network {
+  overflow-y: auto; /* Network 탭에만 스크롤 허용 */
+  flex: 1 1 auto;
+  min-height: 0; /* flex item이 부모보다 작아질 수 있도록 */
+  max-height: 100%; /* 부모 컨테이너를 넘지 않도록 */
+  height: auto; /* 높이를 자동으로 조정 */
+}
+
+/* Events 탭은 이벤트가 많을 수 있으므로 스크롤 허용 */
+.details-section-events {
+  overflow-y: auto; /* Events 탭에만 스크롤 허용 */
+  flex: 1 1 auto;
+  min-height: 0; /* flex item이 부모보다 작아질 수 있도록 */
+  max-height: 100%; /* 부모 컨테이너를 넘지 않도록 */
+  height: auto; /* 높이를 자동으로 조정 */
+  padding-bottom: 0.5rem; /* 스크롤 시 하단 여백 */
 }
 
 .details-info-grid {
@@ -6118,13 +6288,15 @@ export default {
 
 .info-item label {
   font-weight: 600;
-  color: #495057;
+  color: #2c3e50; /* 더 진한 색상으로 구분 */
   font-size: 0.9rem;
+  margin-bottom: 0.25rem; /* label과 value 사이 간격 추가 */
 }
 
 .info-item > div {
-  color: #212529;
+  color: #495057; /* 약간 연한 색상으로 구분 */
   font-size: 0.95rem;
+  font-weight: 400; /* 명시적으로 일반 글꼴 */
 }
 
 .status-message-detail {
@@ -6182,8 +6354,10 @@ export default {
 
 .network-interfaces-detail {
   display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  flex-direction: row; /* 가로 배치 */
+  flex-wrap: wrap; /* 다음 줄로 넘어가도록 */
+  gap: 1rem; /* 간격 조정 */
+  align-items: stretch; /* 모든 항목이 같은 높이를 갖도록 */
 }
 
 .interface-detail-item {
@@ -6191,6 +6365,13 @@ export default {
   border-radius: 8px;
   padding: 1.5rem;
   background-color: #ffffff;
+  flex: 0 0 calc(23% - 0.75rem); /* 한 줄에 4개가 들어가도록 (gap 고려) */
+  min-width: 280px; /* 최소 너비 설정으로 내용이 잘리지 않도록 */
+  max-width: calc(23% - 0.75rem); /* 최대 너비도 동일하게 */
+  box-sizing: border-box; /* padding 포함한 크기 계산 */
+  display: flex;
+  flex-direction: column; /* 내부 요소를 세로로 배치 */
+  height: 100%; /* 부모의 높이에 맞춤 */
 }
 
 .interface-detail-header {
@@ -6218,24 +6399,31 @@ export default {
 .interface-detail-info {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem; /* 세로 간격을 넓혀서 시각적으로 여유있게 */
+  flex: 1; /* 남은 공간을 채우도록 */
 }
 
 .info-row {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem; /* 간격을 줄여서 텍스트가 다음 줄로 넘어가는 것을 방지 */
+  align-items: flex-start; /* 텍스트가 길 경우 상단 정렬 */
+  flex-shrink: 0; /* 줄어들지 않도록 */
 }
 
 .info-row label {
   font-weight: 600;
-  color: #495057;
+  color: #2c3e50; /* 더 진한 색상으로 구분 */
   min-width: 120px;
+  flex-shrink: 0; /* label은 줄어들지 않도록 */
   font-size: 0.9rem;
 }
 
 .info-row span {
-  color: #212529;
+  color: #495057; /* 약간 연한 색상으로 구분 */
   font-size: 0.95rem;
+  font-weight: 400; /* 명시적으로 일반 글꼴 */
+  word-break: break-word; /* 긴 텍스트는 적절히 줄바꿈 */
+  overflow-wrap: break-word; /* 단어가 길 경우 줄바꿈 */
 }
 
 .ip-addresses-list {
@@ -6246,8 +6434,13 @@ export default {
 
 .ip-address-item {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ip-address-display {
+  font-weight: 500;
+  color: #212529;
 }
 
 .auto-ip {
@@ -6258,10 +6451,12 @@ export default {
 .subnet-info {
   color: #6c757d;
   font-size: 0.85rem;
+  margin-top: 0.25rem;
 }
 
 .events-section {
   padding: 1rem 0;
+  padding-bottom: 1.5rem; /* 스크롤 시 하단 여백 추가 */
 }
 
 .events-info {
@@ -6285,19 +6480,76 @@ export default {
 
 .event-item {
   display: flex;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.75rem;
   padding: 1rem;
   border-left: 3px solid #007bff;
   background-color: #f8f9fa;
   border-radius: 4px;
-  margin-bottom: 1rem;
+}
+
+.event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
 }
 
 .event-time {
-  min-width: 150px;
   font-size: 0.85rem;
   color: #6c757d;
   font-weight: 500;
+}
+
+.event-level {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.event-level-info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.event-level-warning {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.event-level-error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.event-level-critical {
+  background-color: #f5c6cb;
+  color: #721c24;
+}
+
+.event-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.event-type {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 0.95rem;
+}
+
+.event-description {
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.event-username {
+  color: #6c757d;
+  font-size: 0.85rem;
+  font-style: italic;
 }
 
 .event-content {

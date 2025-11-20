@@ -1073,4 +1073,81 @@ public class MaasApiService {
                     return Mono.just(errorResult);
                 });
     }
+    
+    /**
+     * MAAS 서버에서 모든 이벤트를 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @return 이벤트 목록
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<List<Map<String, Object>>> getEvents(String maasUrl, String apiKey) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/events/op-query";
+        
+        System.out.println("Get Events - URL: " + url);
+        System.out.println("Get Events - Auth Header: " + authHeader);
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    System.out.println("Get Events - Response Body Length: " + (responseBody != null ? responseBody.length() : 0));
+                    System.out.println("Get Events - Response Body (first 500 chars): " + 
+                        (responseBody != null && responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody));
+                    
+                    try {
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        System.out.println("Get Events - JSON Node Type: " + jsonNode.getNodeType());
+                        
+                        // 응답 형식: {count: 100, events: [...]}
+                        if (jsonNode.has("events") && jsonNode.get("events").isArray()) {
+                            JsonNode eventsArray = jsonNode.get("events");
+                            System.out.println("Get Events - Events Array Size: " + eventsArray.size());
+                            
+                            List<Map<String, Object>> events = new ArrayList<>();
+                            for (JsonNode eventNode : eventsArray) {
+                                Map<String, Object> event = objectMapper.convertValue(eventNode, Map.class);
+                                events.add((Map<String, Object>) event);
+                            }
+                            System.out.println("Get Events - Parsed Events Count: " + events.size());
+                            if (events.size() > 0) {
+                                System.out.println("Get Events - First Event: " + events.get(0));
+                            }
+                            return events;
+                        } else if (jsonNode.isArray()) {
+                            // 배열로 직접 오는 경우도 처리 (이전 형식 호환)
+                            System.out.println("Get Events - Response is direct array, Size: " + jsonNode.size());
+                            List<Map<String, Object>> events = new ArrayList<>();
+                            for (JsonNode eventNode : jsonNode) {
+                                Map<String, Object> event = objectMapper.convertValue(eventNode, Map.class);
+                                events.add((Map<String, Object>) event);
+                            }
+                            return events;
+                        } else {
+                            System.out.println("Get Events - Response does not have 'events' field or is not an array");
+                            System.out.println("Get Events - Available fields: " + jsonNode.fieldNames());
+                        }
+                        return new ArrayList<Map<String, Object>>();
+                    } catch (Exception e) {
+                        System.err.println("Error parsing events response: " + e.getMessage());
+                        e.printStackTrace();
+                        System.err.println("Response body that caused error: " + responseBody);
+                        return new ArrayList<Map<String, Object>>();
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error fetching events: " + e.getMessage());
+                    e.printStackTrace();
+                    if (e.getCause() != null) {
+                        System.err.println("Error cause: " + e.getCause().getMessage());
+                    }
+                    return Mono.just(new ArrayList<Map<String, Object>>());
+                });
+    }
 }

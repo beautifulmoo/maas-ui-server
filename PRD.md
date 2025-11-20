@@ -631,8 +631,12 @@ MachinesTab.vue (실시간 UI 업데이트)
     - HWE Kernel
     - Deployment Status
   - **Events 탭**: 이벤트 히스토리
-    - 현재 상태 정보를 이벤트 형태로 표시
-    - 향후 MAAS API로 상세 이벤트 로그 추가 가능
+    - MAAS 서버의 이벤트 로그를 실시간으로 조회 및 표시
+    - 현재 머신의 system_id와 일치하는 이벤트만 필터링하여 표시
+    - 이벤트 정보: 날짜/시간, 레벨 (INFO, WARNING, ERROR, CRITICAL), 타입, 설명, 사용자
+    - 날짜 순으로 정렬 (최신순)
+    - 현재 상태 정보도 "CURRENT" 레벨로 함께 표시
+    - 스크롤 가능한 목록 (이벤트가 많을 경우)
 - **백엔드 API**:
   - **GET `/api/machines/{systemId}`**: 머신 상세 정보 조회
     - 요청 파라미터: `maasUrl`, `apiKey`
@@ -640,29 +644,47 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **GET `/api/machines/{systemId}/block-devices`**: Block Devices 정보 조회
     - 요청 파라미터: `maasUrl`, `apiKey`
     - 응답: Block Devices 목록 (`results` 또는 `blockdevice_set` 필드)
+  - **GET `/api/events/op-query`**: MAAS 이벤트 조회
+    - 요청 파라미터: `maasUrl`, `apiKey`
+    - 응답: MAAS 서버의 모든 이벤트 목록 (`{count: 100, events: [...]}` 형식)
+    - 프론트엔드에서 `node` 필드가 현재 머신의 `system_id`와 일치하는 이벤트만 필터링
 - **주요 코드 파일**:
   - `MachinesTab.vue`: 
     - `showMachineDetails()`: 머신 상세 정보 모달 열기
     - `closeMachineDetailsModal()`: 모달 닫기
+    - `loadMachineEvents()`: MAAS 이벤트 로드 및 필터링
     - `getUbuntuVersionFromDistroSeries()`: distro_series를 Ubuntu 버전으로 변환
     - `calculateStorageFromBlockDevices()`: Block Devices에서 총 스토리지 계산
     - `formatMemoryBytes()`: 메모리 포맷팅 (bytes → KB/MB/GB/TB)
     - 탭 전환 로직 (`activeDetailsTab`)
+    - `machineEvents`, `loadingEvents`: 이벤트 상태 관리
   - `MaasController.getMachine()`: 머신 상세 정보 API 엔드포인트
   - `MaasController.getMachineBlockDevices()`: Block Devices API 엔드포인트
+  - `MaasController.getEvents()`: MAAS 이벤트 조회 API 엔드포인트
   - `MaasApiService.getMachine()`: MAAS API 호출
   - `MaasApiService.getMachineBlockDevices()`: Block Devices API 호출
+  - `MaasApiService.getEvents()`: MAAS Events API 호출 (`/MAAS/api/2.0/events/op-query`)
 - **내부 로직 흐름**:
   1. FQDN 컬럼의 호스트명 클릭
   2. 머신 상세 정보 모달 열기 (기본적으로 Overview 탭 표시)
   3. 백엔드 `/api/machines/{systemId}` GET 요청으로 머신 상세 정보 로드
   4. 백엔드 `/api/machines/{systemId}/block-devices` GET 요청으로 Block Devices 정보 로드
-  5. 탭 전환 시 해당 탭의 정보 표시
-  6. 모달 헤더 드래그로 위치 이동 가능 (브라우저 영역 내에서만)
+  5. 백엔드 `/api/events/op-query` GET 요청으로 MAAS 이벤트 로드
+  6. 이벤트 필터링: `node` 필드가 현재 머신의 `system_id`와 일치하는 이벤트만 추출
+  7. 이벤트 정렬: `created` 필드 기준으로 최신순 정렬
+  8. 탭 전환 시 해당 탭의 정보 표시
+  9. 모달 헤더 드래그로 위치 이동 가능 (브라우저 영역 내에서만)
 - **UI/UX 특징**:
   - 모달 헤더를 드래그하여 브라우저 영역 내에서 위치 이동 가능
   - 탭 구조로 정보를 체계적으로 분류
   - 로딩 상태 및 에러 처리
+    - 로딩 중에도 탭이 표시되어 팝업 크기가 일정하게 유지됨
+    - 로딩/에러 메시지는 탭 컨텐츠 영역에 표시
+  - 고정된 팝업 크기: 모든 탭에서 동일한 크기 유지 (500px 높이)
+  - 스크롤 처리: 
+    - Network 탭과 Events 탭은 스크롤 가능 (인터페이스/이벤트가 많을 경우)
+    - 다른 탭에서는 스크롤바가 나타나지 않음
+    - 스크롤바 하단 화살표가 완전히 보이도록 flexbox 구조로 높이 계산 최적화
   - 반응형 디자인 (모바일 대응)
   - OS 버전 표시: Ubuntu의 경우 distro_series를 버전으로 변환하여 표시
     - xenial → 16.04 LTS
@@ -670,6 +692,12 @@ MachinesTab.vue (실시간 UI 업데이트)
     - focal → 20.04 LTS
     - jammy → 22.04 LTS
     - noble → 24.04 LTS
+  - Network 탭 특화 기능:
+    - 팝업 가로 크기 확대 (최대 1400px)로 여러 인터페이스를 가로로 배치
+    - 한 줄에 4개의 인터페이스 항목 표시 (4개 초과 시 다음 줄)
+    - 각 인터페이스 항목의 높이 자동 통일 (가장 긴 항목 기준)
+    - IP Address와 Subnet을 같은 레벨의 독립적인 정보로 표시
+    - 서브넷 정보 표시 형식: "Subnet: 서브넷정보" (명확한 라벨 사용)
 - **에러 처리**: API 오류 시 에러 메시지 표시
 - **성능 최적화**:
   - Block Devices 정보는 별도 API로 비동기 로드
@@ -992,6 +1020,7 @@ public class MaasController {
   - `testConnection()`: 연결 테스트
   - `calculateMachineStats()`: 통계 계산
   - `getMachineBlockDevices()`: Block devices 조회
+  - `getEvents()`: MAAS 이벤트 조회 (`/MAAS/api/2.0/events/op-query` 호출)
   - `powerOnMachine()`: 머신 전원 켜기 (예정 - UI 구현 완료, API 미구현)
   - `powerOffMachine()`: 머신 전원 끄기 (예정 - UI 구현 완료, API 미구현)
 
@@ -1232,6 +1261,34 @@ public class MaasController {
   "count": 2
 }
 ```
+
+##### GET /api/events/op-query
+- **설명**: MAAS 서버의 모든 이벤트 조회
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+```json
+{
+  "results": [
+    {
+      "username": "unknown",
+      "node": "hh66wc",
+      "hostname": "maas",
+      "id": 1572,
+      "level": "INFO",
+      "created": "Thu, 20 Nov. 2025 00:40:58",
+      "type": "Ready",
+      "description": ""
+    }
+  ]
+}
+```
+- **MAAS API**: `GET /MAAS/api/2.0/events/op-query`
+- **응답 형식**: `{count: 100, events: [...]}` 형식으로 반환되며, 백엔드에서 `events` 배열을 추출하여 프론트엔드로 전달
+- **프론트엔드 처리**: 
+  - `node` 필드가 현재 머신의 `system_id`와 일치하는 이벤트만 필터링
+  - `created` 필드 기준으로 최신순 정렬 (내림차순)
 
 ##### GET /api/fabrics
 - **설명**: 모든 Fabric 목록 조회
@@ -1608,7 +1665,26 @@ maas.default.api-key=consumer_key:token:token_secret
 3. 버튼이 "Deployed"로 변경
 4. WebSocket을 통한 상태 업데이트 수신
 
-### 5.3 모달 드래그 기능
+### 5.3 머신 상세 정보 모달 UI/UX 개선
+- **고정된 팝업 크기**: 모든 탭에서 동일한 크기 유지 (500px 높이)
+  - 로딩 중에도 탭이 표시되어 팝업 크기가 일정하게 유지됨
+  - 탭 전환 시에도 팝업 크기 변화 없음
+- **스크롤 처리**:
+  - Network 탭을 제외한 다른 탭에서는 스크롤바가 나타나지 않음
+  - Network 탭에서만 인터페이스가 많을 때 스크롤바 표시
+- **Network 탭 레이아웃**:
+  - 팝업 가로 크기 확대: 최대 1400px (기본 900px에서 확대)
+  - 인터페이스 가로 배치: 한 줄에 4개의 인터페이스 항목 표시
+  - 4개 초과 시 자동으로 다음 줄에 배치
+  - 각 인터페이스 항목의 높이 자동 통일 (가장 긴 항목 기준)
+  - 인터페이스 항목 너비: 약 23% (한 줄에 4개 배치)
+  - 정보 항목 간 세로 간격: 1rem (시각적으로 여유있는 레이아웃)
+- **Network 탭 정보 표시**:
+  - IP Address와 Subnet을 같은 레벨의 독립적인 정보로 표시
+  - 서브넷 정보 표시 형식: "Subnet: 서브넷정보" (명확한 라벨 사용)
+  - 각 IP 주소마다 별도의 info-row로 표시
+
+### 5.4 모달 드래그 기능
 - **설명**: 모든 모달 팝업은 헤더를 드래그하여 브라우저 영역 내에서 위치 이동이 가능합니다.
 - **적용 모달**:
   - **Machine Details 모달**: 머신 상세 정보 표시 모달
