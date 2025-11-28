@@ -406,9 +406,21 @@ MachinesTab.vue (실시간 UI 업데이트)
   - Hostname (선택)
   - Architecture (기본값: amd64)
   - MAC Addresses (필수, 쉼표로 구분)
-  - Power Type (기본값: manual)
+  - Power Type (기본값: manual, 옵션: manual, ipmi)
   - Commission 여부 (기본값: false)
+    - **IPMI 선택 시**: 자동으로 true로 설정됨
   - Description (선택)
+  - **IPMI Power Type 전용 필드** (Power Type이 "ipmi"일 때만 표시):
+    - Power Driver (기본값: LAN_2_0, 옵션: LAN [IPMI 1.5], LAN_2_0 [IPMI 2.0])
+    - Power Boot Type (기본값: auto, 옵션: Automatic, Legacy boot, EFI boot)
+    - IP Address (선택)
+    - Power User (선택)
+    - Power Password (선택)
+    - K_g BMC key (선택)
+    - Cipher Suite ID (기본값: 3, 옵션: 17, 3, '', 8, 12)
+    - Privilege Level (기본값: OPERATOR, 옵션: USER, OPERATOR, ADMIN)
+    - Workaround Flags (기본값: ['opensesspriv'], 다중 선택 가능)
+    - Power MAC (선택)
 - **출력**: 추가된 머신 정보
 - **주요 코드 파일**:
   - `MachinesTab.vue`: 모달 UI 및 폼 처리
@@ -417,10 +429,21 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **내부 로직 흐름**:
   1. "Add Machine" 버튼 클릭 → 모달 표시
   2. 사용자가 폼 입력
-  3. MAC 주소 형식 검증
-  4. 백엔드 `/api/machines` POST 요청
-  5. MAAS API `/MAAS/api/2.0/machines/` POST 요청
-  6. 성공 시 머신 목록 새로고침
+  3. Power Type이 "ipmi"로 변경되면:
+     - Commission 자동으로 "true"로 설정
+     - IPMI Configuration 섹션 표시 (박스로 그룹핑)
+  4. MAC 주소 형식 검증
+  5. 백엔드 `/api/machines` POST 요청
+     - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
+     - 빈 값 필드는 form data에 포함하지 않음
+  6. MAAS API `/MAAS/api/2.0/machines/` POST 요청
+     - **Form Data 형식 사용** (`BodyInserters.fromFormData()`)
+     - IPMI 파라미터는 `power_parameters_` 접두사로 전송
+  7. 성공 시 머신 목록 새로고침
+- **UI/UX 특징**:
+  - IPMI Configuration 필드들은 박스로 그룹핑되어 시각적으로 구분됨
+  - IPMI Configuration 헤더로 섹션 구분
+  - 입력되지 않은 필드는 form data에 포함되지 않음
 - **에러 처리**:
   - MAC 주소 형식 오류 검증
   - API 오류 메시지 표시
@@ -560,10 +583,22 @@ MachinesTab.vue (실시간 UI 업데이트)
   6. 백엔드 API 호출 (현재 미구현 - TODO)
 - **UI 구성**:
   - **Power 컬럼**: Power State (상단), Power Type (하단) 표시
+    - **Power State 표시**:
+      - LED 아이콘 + 텍스트 형식
+      - **on**: 녹색 LED (`#28a745`) + "On" 텍스트
+      - **off**: 회색 LED (`#6c757d`) + "Off" 텍스트
+      - **unknown**: 노란색 LED (`#ffc107`) + "Unknown" 텍스트
+    - **Power Type 표시**:
+      - `ipmi` → `IPMI` (대문자)
+      - `unknown` → `Unknown` (첫 글자 대문자)
+      - 기타 타입도 첫 글자 대문자로 표시
   - **드롭다운 메뉴**: 호버 또는 클릭 시 표시되는 컨텍스트 메뉴
     - "TAKE ACTION:" 헤더
     - "Turn on" 옵션 (녹색 아이콘)
     - "Turn off" 옵션 (검은색 아이콘)
+  - **웹소켓 업데이트**:
+    - IPMI 머신의 power_state가 웹소켓으로 실시간 업데이트됨
+    - power_state가 없을 경우 기존 값 유지
 - **현재 상태**: 
   - ✅ UI 구현 완료 (Power 표시, 드롭다운 메뉴)
   - ❌ 백엔드 API 연결 미구현 (TODO 주석 존재)
@@ -607,14 +642,53 @@ MachinesTab.vue (실시간 UI 업데이트)
     - Pool
     - Zone
     - Description (있는 경우)
+    - Power Type (포맷팅: ipmi → IPMI, unknown → Unknown)
+    - Power State (LED 아이콘 + 텍스트)
+  - **Power 탭**: 전원 설정 정보 및 편집
+    - **읽기 모드**:
+      - Power Type (포맷팅: ipmi → IPMI, manual → Manual, unknown → Unknown)
+      - Power State (LED 아이콘 + 텍스트)
+      - **IPMI 타입인 경우**: IPMI 파라미터 표시
+        - Power Driver (포맷팅: LAN_2_0 → "LAN_2_0 [IPMI 2.0]")
+        - Power Boot Type (포맷팅: auto → "Automatic")
+        - IP Address
+        - Power User
+        - Power Password (마스킹: "••••••••")
+        - K_g BMC key (없으면 "-" 표시)
+        - Cipher Suite ID (포맷팅: 3 → "3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128")
+        - Privilege Level (포맷팅: OPERATOR → "Operator")
+        - Workaround Flags (포맷팅된 목록)
+        - Power MAC (없으면 "-" 표시)
+      - **Manual 타입인 경우**: Power Type과 Power State만 표시
+      - Edit 버튼 (하단 고정)
+    - **편집 모드**:
+      - Power Type 선택 (Manual ↔ IPMI)
+        - Power Type 필드는 상단에 독립적으로 배치
+        - Manual 선택 시: 하부 Configuration 섹션 숨김
+        - IPMI 선택 시: "IPMI Configuration" 타이틀과 함께 IPMI 설정 필드 표시
+      - **IPMI Configuration** (IPMI 선택 시에만 표시):
+        - Power Driver (LAN [IPMI 1.5], LAN_2_0 [IPMI 2.0])
+        - Power Boot Type (Automatic, Legacy boot, EFI boot)
+        - IP Address (텍스트 입력)
+        - Power User (텍스트 입력)
+        - Power Password (비밀번호 입력, 비워두면 기존 값 유지)
+        - K_g BMC key (텍스트 입력)
+        - Cipher Suite ID (드롭다운 선택)
+        - Privilege Level (User, Operator, Administrator)
+        - Workaround Flags (체크박스 다중 선택)
+        - Power MAC (텍스트 입력)
+      - Cancel 버튼 (편집 취소)
+      - Save 버튼 (저장)
+      - 편집 폼은 3열 그리드 레이아웃 (반응형: 2열 → 1열)
+      - Workaround Flags 체크박스는 3열 그리드 (반응형: 2열 → 1열)
+      - 편집 폼 내용이 많을 경우 내부 스크롤 가능 (부모 모달 스크롤 방지)
+      - Edit/Cancel/Save 버튼은 항상 하단에 고정 표시
   - **Hardware 탭**: 하드웨어 정보
     - CPU Architecture
     - CPU Cores
     - Memory (포맷팅된 크기)
     - Total Storage (Block Devices에서 계산)
     - Disk Count
-    - Power State
-    - Power Type
     - Block Devices 테이블 (Name, Type, Size, Model)
   - **Network 탭**: 네트워크 인터페이스 상세 정보
     - 각 인터페이스별 정보:
@@ -644,6 +718,40 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **GET `/api/machines/{systemId}/block-devices`**: Block Devices 정보 조회
     - 요청 파라미터: `maasUrl`, `apiKey`
     - 응답: Block Devices 목록 (`results` 또는 `blockdevice_set` 필드)
+  - **GET `/api/machines/{systemId}/power-parameters`**: IPMI Power 파라미터 조회
+    - 요청 파라미터: `maasUrl`, `apiKey`
+    - 응답: IPMI Power 파라미터 정보 (power_type이 "ipmi"인 경우만)
+    - MAAS API: `GET /MAAS/api/2.0/machines/{systemId}/op-power_parameters`
+  - **PUT `/api/machines/{systemId}/power-parameters`**: Power 파라미터 업데이트
+    - 요청 형식: **Form Data** (`application/x-www-form-urlencoded`)
+    - 요청 파라미터:
+      - `maasUrl` (필수): MAAS 서버 URL
+      - `apiKey` (필수): API 키
+      - `powerType` (필수): 전원 타입 (manual, ipmi)
+      - **IPMI 파라미터** (powerType이 "ipmi"일 때만):
+        - `powerDriver` (선택): Power Driver
+        - `powerBootType` (선택): Power Boot Type
+        - `powerIpAddress` (선택): IP Address
+        - `powerUser` (선택): Power User
+        - `powerPassword` (선택): Power Password (비워두면 기존 값 유지)
+        - `powerKgBmcKey` (선택): K_g BMC key
+        - `cipherSuiteId` (선택): Cipher Suite ID
+        - `privilegeLevel` (선택): Privilege Level
+        - `workaroundFlags` (선택): Workaround Flags (쉼표로 구분된 문자열)
+        - `powerMac` (선택): Power MAC
+    - 백엔드 처리:
+      - 프론트엔드에서 받은 파라미터를 `MultiValueMap<String, String>`으로 변환
+      - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+      - IPMI 파라미터는 `power_parameters_` 접두사를 붙여서 전송 (Add Machine과 동일)
+      - 빈 값 필드는 form data에 포함하지 않음
+    - MAAS API: `PUT /MAAS/api/2.0/machines/{systemId}/`
+    - 응답:
+    ```json
+    {
+      "success": true,
+      "data": { /* 업데이트된 머신 정보 */ }
+    }
+    ```
   - **GET `/api/events/op-query`**: MAAS 이벤트 조회
     - 요청 파라미터: `maasUrl`, `apiKey`
     - 응답: MAAS 서버의 모든 이벤트 목록 (`{count: 100, events: [...]}` 형식)
@@ -651,40 +759,61 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **주요 코드 파일**:
   - `MachinesTab.vue`: 
     - `showMachineDetails()`: 머신 상세 정보 모달 열기
-    - `closeMachineDetailsModal()`: 모달 닫기
+    - `closeMachineDetailsModal()`: 모달 닫기 (Power Type 변경 시 머신 목록 자동 리로드)
     - `loadMachineEvents()`: MAAS 이벤트 로드 및 필터링
+    - `loadMachinePowerParameters()`: IPMI Power 파라미터 로드
+    - `startEditingPowerParameters()`: Power 파라미터 편집 모드 시작
+    - `cancelEditingPowerParameters()`: Power 파라미터 편집 취소
+    - `savePowerParameters()`: Power 파라미터 저장
+    - `formatPowerDriver()`, `formatPowerBootType()`, `formatCipherSuiteId()`, `formatPrivilegeLevel()`, `formatWorkaroundFlags()`: IPMI 파라미터 포맷팅 함수
     - `getUbuntuVersionFromDistroSeries()`: distro_series를 Ubuntu 버전으로 변환
     - `calculateStorageFromBlockDevices()`: Block Devices에서 총 스토리지 계산
     - `formatMemoryBytes()`: 메모리 포맷팅 (bytes → KB/MB/GB/TB)
     - 탭 전환 로직 (`activeDetailsTab`)
     - `machineEvents`, `loadingEvents`: 이벤트 상태 관리
+    - `powerParameters`, `loadingPowerParameters`, `powerParametersError`: Power 파라미터 상태 관리
+    - `isEditingPowerParameters`, `editingPowerParameters`, `savingPowerParameters`: 편집 상태 관리
+    - `powerTypeChanged`: Power Type 변경 추적 (Detail 창 닫을 때 머신 목록 리로드용)
   - `MaasController.getMachine()`: 머신 상세 정보 API 엔드포인트
   - `MaasController.getMachineBlockDevices()`: Block Devices API 엔드포인트
+  - `MaasController.getMachinePowerParameters()`: IPMI Power 파라미터 조회 API 엔드포인트
+  - `MaasController.updateMachinePowerParameters()`: Power 파라미터 업데이트 API 엔드포인트
   - `MaasController.getEvents()`: MAAS 이벤트 조회 API 엔드포인트
   - `MaasApiService.getMachine()`: MAAS API 호출
   - `MaasApiService.getMachineBlockDevices()`: Block Devices API 호출
+  - `MaasApiService.getMachinePowerParameters()`: IPMI Power 파라미터 API 호출 (`/MAAS/api/2.0/machines/{systemId}/op-power_parameters`)
+  - `MaasApiService.updateMachinePowerParameters()`: Power 파라미터 업데이트 API 호출 (`PUT /MAAS/api/2.0/machines/{systemId}/`)
   - `MaasApiService.getEvents()`: MAAS Events API 호출 (`/MAAS/api/2.0/events/op-query`)
+  - `MaasApiService.createPowerParametersFormData()`: Power 파라미터용 Form Data 생성
 - **내부 로직 흐름**:
   1. FQDN 컬럼의 호스트명 클릭
   2. 머신 상세 정보 모달 열기 (기본적으로 Overview 탭 표시)
   3. 백엔드 `/api/machines/{systemId}` GET 요청으로 머신 상세 정보 로드
   4. 백엔드 `/api/machines/{systemId}/block-devices` GET 요청으로 Block Devices 정보 로드
-  5. 백엔드 `/api/events/op-query` GET 요청으로 MAAS 이벤트 로드
-  6. 이벤트 필터링: `node` 필드가 현재 머신의 `system_id`와 일치하는 이벤트만 추출
-  7. 이벤트 정렬: `created` 필드 기준으로 최신순 정렬
-  8. 탭 전환 시 해당 탭의 정보 표시
-  9. 모달 헤더 드래그로 위치 이동 가능 (브라우저 영역 내에서만)
+  5. Power Type이 "ipmi"인 경우: 백엔드 `/api/machines/{systemId}/power-parameters` GET 요청으로 IPMI 파라미터 로드
+  6. 백엔드 `/api/events/op-query` GET 요청으로 MAAS 이벤트 로드
+  7. 이벤트 필터링: `node` 필드가 현재 머신의 `system_id`와 일치하는 이벤트만 추출
+  8. 이벤트 정렬: `created` 필드 기준으로 최신순 정렬
+  9. 탭 전환 시 해당 탭의 정보 표시
+  10. Power 탭에서 Edit 버튼 클릭 시 편집 모드로 전환
+  11. Power Type 변경 시 IPMI Configuration 필드 동적 표시/숨김
+  12. Save 버튼 클릭 시 백엔드 `/api/machines/{systemId}/power-parameters` PUT 요청으로 저장
+  13. 저장 성공 후 편집 모드 종료 및 데이터 다시 로드
+  14. Power Type이 변경된 경우 `powerTypeChanged` 플래그 설정
+  15. 모달 닫을 때 Power Type 변경 여부 확인 후 머신 목록 자동 리로드
+  16. 모달 헤더 드래그로 위치 이동 가능 (브라우저 영역 내에서만)
 - **UI/UX 특징**:
   - 모달 헤더를 드래그하여 브라우저 영역 내에서 위치 이동 가능
   - 탭 구조로 정보를 체계적으로 분류
   - 로딩 상태 및 에러 처리
     - 로딩 중에도 탭이 표시되어 팝업 크기가 일정하게 유지됨
     - 로딩/에러 메시지는 탭 컨텐츠 영역에 표시
-  - 고정된 팝업 크기: 모든 탭에서 동일한 크기 유지 (500px 높이)
+  - 고정된 팝업 크기: 모든 탭에서 동일한 크기 유지 (600px 높이)
   - 스크롤 처리: 
-    - Network 탭과 Events 탭은 스크롤 가능 (인터페이스/이벤트가 많을 경우)
+    - Network 탭, Events 탭, Power 탭(편집 모드)은 스크롤 가능 (내용이 많을 경우)
     - 다른 탭에서는 스크롤바가 나타나지 않음
     - 스크롤바 하단 화살표가 완전히 보이도록 flexbox 구조로 높이 계산 최적화
+    - Power 탭 편집 모드에서 편집 폼 내용이 많을 경우 내부 스크롤 가능 (부모 모달 스크롤 방지)
   - 반응형 디자인 (모바일 대응)
   - OS 버전 표시: Ubuntu의 경우 distro_series를 버전으로 변환하여 표시
     - xenial → 16.04 LTS
@@ -987,6 +1116,8 @@ public class MaasController {
     - PUT /api/machines/{systemId}/interfaces/{interfaceId}/vlan
     - POST /api/machines/{systemId}/interfaces/{interfaceId}/link-subnet
     - POST /api/machines/{systemId}/interfaces/{interfaceId}/unlink-subnet
+    - GET /api/machines/{systemId}/power-parameters
+    - PUT /api/machines/{systemId}/power-parameters
     - POST /api/machines/{systemId}/power-on (예정 - UI 구현 완료, API 미구현)
     - POST /api/machines/{systemId}/power-off (예정 - UI 구현 완료, API 미구현)
     - GET /api/test-connection
@@ -1020,6 +1151,9 @@ public class MaasController {
   - `testConnection()`: 연결 테스트
   - `calculateMachineStats()`: 통계 계산
   - `getMachineBlockDevices()`: Block devices 조회
+  - `getMachinePowerParameters()`: IPMI Power 파라미터 조회 (`/MAAS/api/2.0/machines/{systemId}/op-power_parameters` 호출)
+  - `updateMachinePowerParameters()`: Power 파라미터 업데이트 (`PUT /MAAS/api/2.0/machines/{systemId}/` 호출)
+  - `createPowerParametersFormData()`: Power 파라미터용 Form Data 생성
   - `getEvents()`: MAAS 이벤트 조회 (`/MAAS/api/2.0/events/op-query` 호출)
   - `powerOnMachine()`: 머신 전원 켜기 (예정 - UI 구현 완료, API 미구현)
   - `powerOffMachine()`: 머신 전원 끄기 (예정 - UI 구현 완료, API 미구현)
@@ -1168,15 +1302,42 @@ public class MaasController {
 
 ##### POST /api/machines
 - **설명**: 머신 추가
+- **요청 형식**: **Form Data** (`application/x-www-form-urlencoded` 또는 `multipart/form-data`)
 - **요청 파라미터**:
   - `maasUrl` (필수): MAAS 서버 URL
   - `apiKey` (필수): API 키
   - `hostname` (선택): 호스트명
   - `architecture` (선택, 기본값: amd64): 아키텍처
   - `macAddresses` (필수): MAC 주소 (쉼표로 구분)
-  - `powerType` (선택, 기본값: manual): 전원 타입
+  - `powerType` (선택, 기본값: manual): 전원 타입 (manual, ipmi)
   - `commission` (선택, 기본값: false): 커미셔닝 여부
   - `description` (선택): 설명
+  - **IPMI 파라미터** (powerType이 "ipmi"일 때만):
+    - `powerDriver` (선택, 기본값: LAN_2_0): Power Driver
+    - `powerBootType` (선택, 기본값: auto): Power Boot Type
+    - `powerIpAddress` (선택): IP Address
+    - `powerUser` (선택): Power User
+    - `powerPassword` (선택): Power Password
+    - `powerKgBmcKey` (선택): K_g BMC key
+    - `cipherSuiteId` (선택, 기본값: 3): Cipher Suite ID
+    - `privilegeLevel` (선택, 기본값: OPERATOR): Privilege Level
+    - `workaroundFlags` (선택, 기본값: opensesspriv): Workaround Flags (쉼표로 구분)
+    - `powerMac` (선택): Power MAC
+- **백엔드 처리**:
+  - 프론트엔드에서 받은 파라미터를 `MultiValueMap<String, String>`으로 변환
+  - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+  - IPMI 파라미터는 `power_parameters_` 접두사를 붙여서 전송:
+    - `powerDriver` → `power_parameters_power_driver`
+    - `powerBootType` → `power_parameters_power_boot_type`
+    - `powerIpAddress` → `power_parameters_power_address`
+    - `powerUser` → `power_parameters_power_user`
+    - `powerPassword` → `power_parameters_power_pass`
+    - `powerKgBmcKey` → `power_parameters_k_g`
+    - `cipherSuiteId` → `power_parameters_cipher_suite_id`
+    - `privilegeLevel` → `power_parameters_privilege_level`
+    - `workaroundFlags` → `power_parameters_workaround_flags`
+    - `powerMac` → `power_parameters_mac_address`
+  - 빈 값 필드는 form data에 포함하지 않음
 - **응답**:
 ```json
 {
@@ -1353,11 +1514,15 @@ public class MaasController {
 
 ##### PUT /api/machines/{systemId}/interfaces/{interfaceId}/vlan
 - **설명**: 인터페이스의 VLAN 업데이트 또는 삭제
+- **요청 형식**: **Form Data** (`application/x-www-form-urlencoded`)
 - **VLAN 삭제**: vlanId가 빈 문자열이거나 null이면 vlan=""로 설정하여 VLAN 연결 제거
 - **요청 파라미터**:
   - `maasUrl` (필수): MAAS 서버 URL
   - `apiKey` (필수): API 키
   - `vlanId` (필수): VLAN ID
+- **백엔드 처리**:
+  - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+  - MAAS API: `PUT /MAAS/api/2.0/nodes/{systemId}/interfaces/{interfaceId}/` with form data `vlan={vlanId}`
 - **응답**:
 ```json
 {
@@ -1368,11 +1533,15 @@ public class MaasController {
 
 ##### POST /api/machines/{systemId}/interfaces/{interfaceId}/link-subnet
 - **설명**: 인터페이스에 IP 주소 링크 (Primary 또는 Secondary)
+- **요청 형식**: **Form Data** (`application/x-www-form-urlencoded`)
 - **요청 파라미터**:
   - `maasUrl` (필수): MAAS 서버 URL
   - `apiKey` (필수): API 키
   - `subnetId` (필수): Subnet ID
   - `ipAddress` (선택): IP 주소 (null이면 AUTO 모드)
+- **백엔드 처리**:
+  - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+  - MAAS API: `POST /MAAS/api/2.0/nodes/{systemId}/interfaces/{interfaceId}/op-link_subnet` with form data
 - **응답**:
 ```json
 {
@@ -1383,10 +1552,14 @@ public class MaasController {
 
 ##### POST /api/machines/{systemId}/interfaces/{interfaceId}/unlink-subnet
 - **설명**: 인터페이스에서 IP 주소 링크 삭제
+- **요청 형식**: **Form Data** (`application/x-www-form-urlencoded`)
 - **요청 파라미터**:
   - `maasUrl` (필수): MAAS 서버 URL
   - `apiKey` (필수): API 키
   - `linkId` (필수): 링크 ID
+- **백엔드 처리**:
+  - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+  - MAAS API: `POST /MAAS/api/2.0/nodes/{systemId}/interfaces/{interfaceId}/op-unlink_subnet` with form data
 - **응답**:
 ```json
 {

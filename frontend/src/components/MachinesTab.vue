@@ -1,7 +1,7 @@
 <template>
   <div class="machines">
     <div class="header">
-      <h2>Machines</h2>
+    <h2>Machines</h2>
       
       <!-- Action Bar (shown when machines are selected) -->
       <div v-if="!loading && !error && selectedMachines.length > 0" class="action-bar">
@@ -162,7 +162,7 @@
           <tr>
             <th class="checkbox-col">
               <div class="select-all-container">
-                <input type="checkbox" v-model="selectAll" @change="toggleSelectAll">
+              <input type="checkbox" v-model="selectAll" @change="toggleSelectAll">
                 <span 
                   class="status-select-dropdown-icon"
                   @click.stop="toggleStatusSelectMenu($event)"
@@ -216,11 +216,12 @@
               <div class="power-container" 
                    @mouseenter="hoveredPowerMachine = machine.id"
                    @mouseleave="hoveredPowerMachine = null">
-                <span class="power-status">
-                  {{ machine.power_state || 'Unknown' }}
-                </span>
+              <span class="power-status">
+                  <span class="power-led" :class="getPowerStateClass(machine.power_state)"></span>
+                  {{ formatPowerState(machine.power_state) }}
+              </span>
                 <span class="power-type">
-                  {{ machine.power_type || 'Manual' }}
+                  {{ formatPowerType(machine.power_type) }}
                 </span>
                 <span 
                   v-if="hoveredPowerMachine === machine.id || openPowerMenu === machine.id"
@@ -245,8 +246,8 @@
               <div class="owner-info">
                 <span class="owner" v-if="machine.owner">{{ machine.owner }}</span>
                 <span class="owner" v-else>-</span>
-                <div class="tags" v-if="machine.tags && machine.tags.length > 0">
-                  <span v-for="tag in machine.tags" :key="tag" class="tag">{{ tag }}</span>
+              <div class="tags" v-if="machine.tags && machine.tags.length > 0">
+                <span v-for="tag in machine.tags" :key="tag" class="tag">{{ tag }}</span>
                 </div>
               </div>
             </td>
@@ -274,7 +275,7 @@
                    <td class="actions-col">
                      <div class="action-buttons">
                       <!-- Failed Deployment, Deployed, 또는 Allocated 상태일 때는 Release 버튼 표시 -->
-                      <button 
+                       <button 
                         v-if="isFailedDeployment(machine.status) || machine.status?.toLowerCase() === 'deployed' || machine.status?.toLowerCase() === 'allocated'"
                         class="btn-small btn-release"
                         @click="releaseMachine(machine)"
@@ -699,6 +700,13 @@
               </button>
               <button 
                 class="details-tab"
+                :class="{ active: activeDetailsTab === 'power' }"
+                @click="activeDetailsTab = 'power'"
+              >
+                Power
+              </button>
+              <button 
+                class="details-tab"
                 :class="{ active: activeDetailsTab === 'hardware' }"
                 @click="activeDetailsTab = 'hardware'"
               >
@@ -799,6 +807,616 @@
                     <label>Description</label>
                     <div>{{ machineDetails.description }}</div>
                   </div>
+                  
+                  <div class="info-item">
+                    <label>Power Type</label>
+                    <div>{{ formatPowerType(machineDetails.power_type) }}</div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Power Tab -->
+              <div v-if="activeDetailsTab === 'power'" class="details-section details-section-power">
+                <div v-if="loadingPowerParameters" class="loading">
+                  <p>Loading power parameters...</p>
+                </div>
+                <div v-else-if="powerParametersError" class="error">
+                  <p>{{ powerParametersError }}</p>
+                </div>
+                <div v-else-if="machineDetails.power_type === 'ipmi' && powerParameters">
+                  <!-- Read Mode -->
+                  <div v-if="!isEditingPowerParameters" class="details-info-grid">
+                  <div class="info-item">
+                    <label>Power Type</label>
+                    <div>{{ formatPowerType(machineDetails.power_type) }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Power State</label>
+                    <div>
+                      <span class="power-led" :class="getPowerStateClass(machineDetails.power_state)"></span>
+                      {{ formatPowerState(machineDetails.power_state) }}
+                    </div>
+                  </div>
+                  
+                  <div v-if="powerParameters.power_driver" class="info-item">
+                    <label>Power Driver</label>
+                    <div>{{ formatPowerDriver(powerParameters.power_driver) }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.power_boot_type" class="info-item">
+                    <label>Power Boot Type</label>
+                    <div>{{ formatPowerBootType(powerParameters.power_boot_type) }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.power_address" class="info-item">
+                    <label>IP Address</label>
+                    <div>{{ powerParameters.power_address }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.power_user" class="info-item">
+                    <label>Power User</label>
+                    <div>{{ powerParameters.power_user }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.power_pass" class="info-item">
+                    <label>Power Password</label>
+                    <div>••••••••</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>K_g BMC key</label>
+                    <div>{{ powerParameters.k_g || '-' }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.cipher_suite_id !== undefined && powerParameters.cipher_suite_id !== null" class="info-item">
+                    <label>Cipher Suite ID</label>
+                    <div>{{ formatCipherSuiteId(powerParameters.cipher_suite_id) }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.privilege_level" class="info-item">
+                    <label>Privilege Level</label>
+                    <div>{{ formatPrivilegeLevel(powerParameters.privilege_level) }}</div>
+                  </div>
+                  
+                  <div v-if="powerParameters.workaround_flags" class="info-item">
+                    <label>Workaround Flags</label>
+                    <div>{{ formatWorkaroundFlags(powerParameters.workaround_flags) }}</div>
+                  </div>
+                  
+                  <div class="info-item">
+                    <label>Power MAC</label>
+                    <div>{{ powerParameters.mac_address || '-' }}</div>
+                  </div>
+                  </div>
+                  
+                  <!-- Edit Button (Read Mode) - Always at bottom -->
+                  <div v-if="!isEditingPowerParameters" class="power-edit-actions">
+                    <button class="btn-primary btn-sm" @click="startEditingPowerParameters">
+                      Edit
+                    </button>
+                  </div>
+                  
+                  <!-- Edit Mode -->
+                  <div v-else class="power-edit-form">
+                    <!-- Power Type (Always visible at top) -->
+                    <div class="form-group">
+                      <label for="editPowerType">Power Type</label>
+                      <select id="editPowerType" v-model="editingPowerParameters.powerType" class="form-select">
+                        <option value="manual">Manual</option>
+                        <option value="ipmi">IPMI</option>
+                      </select>
+                    </div>
+                    
+                    <!-- IPMI Configuration (Only when IPMI is selected) -->
+                    <template v-if="editingPowerParameters.powerType === 'ipmi'">
+                      <div class="ipmi-fields-group">
+                        <div class="ipmi-fields-header">
+                          <label>IPMI Configuration</label>
+                        </div>
+                        <div class="ipmi-fields-content ipmi-edit-grid">
+                          <div class="form-group">
+                            <label for="editPowerDriver">Power Driver</label>
+                            <select id="editPowerDriver" v-model="editingPowerParameters.powerDriver" class="form-select">
+                              <option value="LAN">LAN [IPMI 1.5]</option>
+                              <option value="LAN_2_0">LAN_2_0 [IPMI 2.0]</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerBootType">Power Boot Type</label>
+                            <select id="editPowerBootType" v-model="editingPowerParameters.powerBootType" class="form-select">
+                              <option value="auto">Automatic</option>
+                              <option value="legacy">Legacy boot</option>
+                              <option value="efi">EFI boot</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerIpAddress">IP Address</label>
+                            <input
+                              type="text"
+                              id="editPowerIpAddress"
+                              v-model="editingPowerParameters.powerIpAddress"
+                              placeholder="e.g., 192.168.1.100"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerUser">Power User</label>
+                            <input
+                              type="text"
+                              id="editPowerUser"
+                              v-model="editingPowerParameters.powerUser"
+                              placeholder="IPMI username"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerPassword">Power Password</label>
+                            <input
+                              type="password"
+                              id="editPowerPassword"
+                              v-model="editingPowerParameters.powerPassword"
+                              placeholder="IPMI password (leave blank to keep current)"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerKgBmcKey">K_g BMC key</label>
+                            <input
+                              type="text"
+                              id="editPowerKgBmcKey"
+                              v-model="editingPowerParameters.powerKgBmcKey"
+                              placeholder="K_g BMC key"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editCipherSuiteId">Cipher Suite ID</label>
+                            <select id="editCipherSuiteId" v-model="editingPowerParameters.cipherSuiteId" class="form-select">
+                              <option value="17">17 - HMAC-SHA256::HMAC_SHA256_128::AES-CBC-128</option>
+                              <option value="3">3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128</option>
+                              <option value="">freeipmi-tools default</option>
+                              <option value="8">8 - HMAC-MD5::HMAC-MD5-128::AES-CBC-128</option>
+                              <option value="12">12 - HMAC-MD5::MD5-128::AES-CBC-128</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPrivilegeLevel">Privilege Level</label>
+                            <select id="editPrivilegeLevel" v-model="editingPowerParameters.privilegeLevel" class="form-select">
+                              <option value="USER">User</option>
+                              <option value="OPERATOR">Operator</option>
+                              <option value="ADMIN">Administrator</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerMac">Power MAC</label>
+                            <input
+                              type="text"
+                              id="editPowerMac"
+                              v-model="editingPowerParameters.powerMac"
+                              placeholder="e.g., 08:00:27:11:34:26"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group form-group-full-width">
+                            <label>Workaround Flags</label>
+                            <div class="checkbox-group">
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="opensesspriv"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Opensesspriv
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="authcap"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Authcap
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="idzero"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Idzero
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="unexpectedauth"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Unexpectedauth
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="forcepermsg"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Forcepermsg
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="endianseq"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Endianseq
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="intel20"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Intel20
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="supermicro20"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Supermicro20
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="sun20"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Sun20
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="nochecksumcheck"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Nochecksumcheck
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="integritycheckvalue"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Integritycheckvalue
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="ipmiping"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Ipmiping
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value=""
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                None
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                    
+                    <div class="power-edit-actions">
+                      <button class="btn-secondary btn-sm" @click="cancelEditingPowerParameters">
+                        Cancel
+                      </button>
+                      <button class="btn-primary btn-sm" @click="savePowerParameters" :disabled="savingPowerParameters">
+                        <span v-if="savingPowerParameters">Saving...</span>
+                        <span v-else>Save</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="machineDetails.power_type !== 'ipmi'">
+                  <!-- Read Mode -->
+                  <div v-if="!isEditingPowerParameters" class="details-info-grid">
+                    <div class="info-item">
+                      <label>Power Type</label>
+                      <div>{{ formatPowerType(machineDetails.power_type) }}</div>
+                    </div>
+                    
+                    <div class="info-item">
+                      <label>Power State</label>
+                      <div>
+                        <span class="power-led" :class="getPowerStateClass(machineDetails.power_state)"></span>
+                        {{ formatPowerState(machineDetails.power_state) }}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Edit Button (Read Mode) -->
+                  <div v-if="!isEditingPowerParameters" class="power-edit-actions">
+                    <button class="btn-primary btn-sm" @click="startEditingPowerParameters">
+                      Edit
+                    </button>
+                  </div>
+                  
+                  <!-- Edit Mode -->
+                  <div v-else class="power-edit-form">
+                    <!-- Power Type (Always visible at top) -->
+                    <div class="form-group">
+                      <label for="editPowerTypeManual">Power Type</label>
+                      <select id="editPowerTypeManual" v-model="editingPowerParameters.powerType" class="form-select">
+                        <option value="manual">Manual</option>
+                        <option value="ipmi">IPMI</option>
+                      </select>
+                    </div>
+                    
+                    <!-- IPMI Configuration (Only when IPMI is selected) -->
+                    <template v-if="editingPowerParameters.powerType === 'ipmi'">
+                      <div class="ipmi-fields-group">
+                        <div class="ipmi-fields-header">
+                          <label>IPMI Configuration</label>
+                        </div>
+                        <div class="ipmi-fields-content ipmi-edit-grid">
+                          <div class="form-group">
+                            <label for="editPowerDriverManual">Power Driver</label>
+                            <select id="editPowerDriverManual" v-model="editingPowerParameters.powerDriver" class="form-select">
+                              <option value="LAN">LAN [IPMI 1.5]</option>
+                              <option value="LAN_2_0">LAN_2_0 [IPMI 2.0]</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerBootTypeManual">Power Boot Type</label>
+                            <select id="editPowerBootTypeManual" v-model="editingPowerParameters.powerBootType" class="form-select">
+                              <option value="auto">Automatic</option>
+                              <option value="legacy">Legacy boot</option>
+                              <option value="efi">EFI boot</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerIpAddressManual">IP Address</label>
+                            <input
+                              type="text"
+                              id="editPowerIpAddressManual"
+                              v-model="editingPowerParameters.powerIpAddress"
+                              placeholder="e.g., 192.168.1.100"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerUserManual">Power User</label>
+                            <input
+                              type="text"
+                              id="editPowerUserManual"
+                              v-model="editingPowerParameters.powerUser"
+                              placeholder="IPMI username"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerPasswordManual">Power Password</label>
+                            <input
+                              type="password"
+                              id="editPowerPasswordManual"
+                              v-model="editingPowerParameters.powerPassword"
+                              placeholder="IPMI password (leave blank to keep current)"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerKgBmcKeyManual">K_g BMC key</label>
+                            <input
+                              type="text"
+                              id="editPowerKgBmcKeyManual"
+                              v-model="editingPowerParameters.powerKgBmcKey"
+                              placeholder="K_g BMC key"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editCipherSuiteIdManual">Cipher Suite ID</label>
+                            <select id="editCipherSuiteIdManual" v-model="editingPowerParameters.cipherSuiteId" class="form-select">
+                              <option value="17">17 - HMAC-SHA256::HMAC_SHA256_128::AES-CBC-128</option>
+                              <option value="3">3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128</option>
+                              <option value="">freeipmi-tools default</option>
+                              <option value="8">8 - HMAC-MD5::HMAC-MD5-128::AES-CBC-128</option>
+                              <option value="12">12 - HMAC-MD5::MD5-128::AES-CBC-128</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPrivilegeLevelManual">Privilege Level</label>
+                            <select id="editPrivilegeLevelManual" v-model="editingPowerParameters.privilegeLevel" class="form-select">
+                              <option value="USER">User</option>
+                              <option value="OPERATOR">Operator</option>
+                              <option value="ADMIN">Administrator</option>
+                            </select>
+                          </div>
+
+                          <div class="form-group">
+                            <label for="editPowerMacManual">Power MAC</label>
+                            <input
+                              type="text"
+                              id="editPowerMacManual"
+                              v-model="editingPowerParameters.powerMac"
+                              placeholder="e.g., 08:00:27:11:34:26"
+                              class="form-input"
+                            >
+                          </div>
+
+                          <div class="form-group form-group-full-width">
+                            <label>Workaround Flags</label>
+                            <div class="checkbox-group">
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="opensesspriv"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Opensesspriv
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="authcap"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Authcap
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="idzero"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Idzero
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="unexpectedauth"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Unexpectedauth
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="forcepermsg"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Forcepermsg
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="endianseq"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Endianseq
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="intel20"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Intel20
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="supermicro20"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Supermicro20
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="sun20"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Sun20
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="nochecksumcheck"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Nochecksumcheck
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="integritycheckvalue"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Integritycheckvalue
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value="ipmiping"
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                Ipmiping
+                              </label>
+                              <label class="checkbox-label">
+                                <input
+                                  type="checkbox"
+                                  value=""
+                                  v-model="editingPowerParameters.workaroundFlags"
+                                  class="form-checkbox"
+                                >
+                                None
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                    
+                    <div class="power-edit-actions">
+                      <button class="btn-secondary btn-sm" @click="cancelEditingPowerParameters">
+                        Cancel
+                      </button>
+                      <button class="btn-primary btn-sm" @click="savePowerParameters" :disabled="savingPowerParameters">
+                        <span v-if="savingPowerParameters">Saving...</span>
+                        <span v-else>Save</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="no-data">
+                  <p>No power parameters found.</p>
                 </div>
               </div>
               
@@ -840,16 +1458,6 @@
                         ? selectedMachineForDetails.disk_count 
                         : (machineBlockDevices.length > 0 ? machineBlockDevices.length : (machineDetails?.blockdevice_set?.length || 0))
                     }}</div>
-                  </div>
-                  
-                  <div class="info-item">
-                    <label>Power State</label>
-                    <div>{{ machineDetails.power_state || 'Unknown' }}</div>
-                  </div>
-                  
-                  <div class="info-item">
-                    <label>Power Type</label>
-                    <div>{{ machineDetails.power_type || 'Manual' }}</div>
                   </div>
                 </div>
                 
@@ -1019,8 +1627,8 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
+          </div>
+          </div>
 
     <!-- Add Machine Modal -->
     <div v-if="showAddModal" class="modal-overlay" @click="closeAddMachineModal">
@@ -1067,8 +1675,234 @@
             <label for="powerType">Power Type</label>
             <select id="powerType" v-model="newMachine.powerType" class="form-select">
               <option value="manual">manual</option>
+              <option value="ipmi">ipmi</option>
             </select>
           </div>
+
+          <!-- IPMI-specific fields -->
+          <template v-if="newMachine.powerType === 'ipmi'">
+            <div class="ipmi-fields-group">
+              <div class="ipmi-fields-header">
+                <label>IPMI Configuration</label>
+              </div>
+              <div class="ipmi-fields-content">
+            <div class="form-group">
+              <label for="powerDriver">Power Driver</label>
+              <select id="powerDriver" v-model="newMachine.powerDriver" class="form-select">
+                <option value="LAN">LAN [IPMI 1.5]</option>
+                <option value="LAN_2_0">LAN_2_0 [IPMI 2.0]</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="powerBootType">Power Boot Type</label>
+              <select id="powerBootType" v-model="newMachine.powerBootType" class="form-select">
+                <option value="auto">Automatic</option>
+                <option value="legacy">Legacy boot</option>
+                <option value="efi">EFI boot</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="powerIpAddress">IP Address</label>
+              <input
+                type="text"
+                id="powerIpAddress"
+                v-model="newMachine.powerIpAddress"
+                placeholder="e.g., 192.168.1.100"
+                class="form-input"
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="powerUser">Power User</label>
+              <input
+                type="text"
+                id="powerUser"
+                v-model="newMachine.powerUser"
+                placeholder="IPMI username"
+                class="form-input"
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="powerPassword">Power Password</label>
+              <input
+                type="password"
+                id="powerPassword"
+                v-model="newMachine.powerPassword"
+                placeholder="IPMI password"
+                class="form-input"
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="powerKgBmcKey">K_g BMC key</label>
+              <input
+                type="text"
+                id="powerKgBmcKey"
+                v-model="newMachine.powerKgBmcKey"
+                placeholder="K_g BMC key"
+                class="form-input"
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="cipherSuiteId">Cipher Suite ID</label>
+              <select id="cipherSuiteId" v-model="newMachine.cipherSuiteId" class="form-select">
+                <option value="17">17 - HMAC-SHA256::HMAC_SHA256_128::AES-CBC-128</option>
+                <option value="3">3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128</option>
+                <option value="">freeipmi-tools default</option>
+                <option value="8">8 - HMAC-MD5::HMAC-MD5-128::AES-CBC-128</option>
+                <option value="12">12 - HMAC-MD5::MD5-128::AES-CBC-128</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="privilegeLevel">Privilege Level</label>
+              <select id="privilegeLevel" v-model="newMachine.privilegeLevel" class="form-select">
+                <option value="USER">User</option>
+                <option value="OPERATOR">Operator</option>
+                <option value="ADMIN">Administrator</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Workaround Flags</label>
+              <div class="checkbox-group">
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="opensesspriv"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Opensesspriv
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="authcap"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Authcap
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="idzero"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Idzero
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="unexpectedauth"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Unexpectedauth
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="forcepermsg"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Forcepermsg
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="endianseq"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Endianseq
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="intel20"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Intel20
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="supermicro20"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Supermicro20
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="sun20"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Sun20
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="nochecksumcheck"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Nochecksumcheck
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="integritycheckvalue"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Integritycheckvalue
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value="ipmiping"
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  Ipmiping
+                </label>
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    value=""
+                    v-model="newMachine.workaroundFlags"
+                    class="form-checkbox"
+                  >
+                  None
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="powerMac">Power MAC</label>
+              <input
+                type="text"
+                id="powerMac"
+                v-model="newMachine.powerMac"
+                placeholder="e.g., 08:00:27:11:34:26"
+                class="form-input"
+              >
+            </div>
+              </div>
+            </div>
+          </template>
 
           <div class="form-group">
             <label for="commission">Commission</label>
@@ -1152,7 +1986,18 @@ export default {
       macAddresses: '',
       powerType: 'manual',
       commission: 'false',
-      description: ''
+      description: '',
+      // IPMI fields
+      powerDriver: 'LAN_2_0',
+      powerBootType: 'auto',
+      powerIpAddress: '',
+      powerUser: '',
+      powerPassword: '',
+      powerKgBmcKey: '',
+      cipherSuiteId: '3',
+      privilegeLevel: 'OPERATOR',
+      workaroundFlags: ['opensesspriv'],
+      powerMac: ''
     })
     
     // Commission Machine
@@ -1256,9 +2101,10 @@ export default {
           if (powerContainer) {
             const buttonRect = powerContainer.getBoundingClientRect()
             if (buttonRect) {
+              // position: fixed를 사용하므로 viewport 기준 좌표 사용 (스크롤 오프셋 없음)
               powerMenuPosition.value = {
-                top: buttonRect.bottom + window.scrollY + 4,
-                left: buttonRect.left + window.scrollX
+                top: buttonRect.bottom + 4,
+                left: buttonRect.left
               }
               openPowerMenu.value = machineId
             } else {
@@ -1310,6 +2156,24 @@ export default {
     const loadingBlockDevices = ref(false)
     const machineEvents = ref([])
     const loadingEvents = ref(false)
+    const powerParameters = ref(null)
+    const loadingPowerParameters = ref(false)
+    const powerParametersError = ref(null)
+    const powerTypeChanged = ref(false) // Power Type이 변경되었는지 추적
+    const isEditingPowerParameters = ref(false)
+    const editingPowerParameters = ref({
+      powerType: 'manual',
+      powerDriver: '',
+      powerBootType: 'auto',
+      powerIpAddress: '',
+      powerUser: '',
+      powerPassword: '',
+      powerKgBmcKey: '',
+      cipherSuiteId: '3',
+      privilegeLevel: 'OPERATOR',
+      workaroundFlags: ['opensesspriv'],
+      powerMac: ''
+    })
     
     // Modal drag state
     const isDraggingModal = ref(false)
@@ -1368,6 +2232,14 @@ export default {
             loadingBlockDevices.value = false
           }
           
+          // Power Parameters 정보 가져오기 (IPMI인 경우만)
+          if (machineDetails.value.power_type === 'ipmi') {
+            await loadMachinePowerParameters(machine.id)
+          } else {
+            powerParameters.value = null
+            powerParametersError.value = null
+          }
+          
           // Events 정보도 가져오기
           await loadMachineEvents(machine.id)
         } else {
@@ -1379,6 +2251,217 @@ export default {
       } finally {
         loadingMachineDetails.value = false
       }
+    }
+    
+    const loadMachinePowerParameters = async (systemId) => {
+      loadingPowerParameters.value = true
+      powerParameters.value = null
+      powerParametersError.value = null
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        console.log('[Machine Details] Loading power parameters for systemId:', systemId)
+        const powerParamsResponse = await axios.get(`http://localhost:8081/api/machines/${systemId}/power-parameters`, {
+          params: apiParams
+        })
+        
+        console.log('[Machine Details] Power Parameters API response:', powerParamsResponse.data)
+        
+        if (powerParamsResponse.data && !powerParamsResponse.data.error) {
+          powerParameters.value = powerParamsResponse.data
+          console.log('[Machine Details] Power parameters loaded:', powerParameters.value)
+        } else {
+          powerParametersError.value = powerParamsResponse.data?.error || 'Failed to load power parameters'
+        }
+      } catch (err) {
+        console.error('[Machine Details] Error loading power parameters:', err)
+        powerParametersError.value = err.response?.data?.error || err.message || 'Failed to load power parameters'
+      } finally {
+        loadingPowerParameters.value = false
+      }
+    }
+    
+    const savingPowerParameters = ref(false)
+    
+    const startEditingPowerParameters = () => {
+      if (!machineDetails.value) return
+      
+      // 현재 power type과 power parameters 값을 편집용 데이터로 복사
+      editingPowerParameters.value = {
+        powerType: machineDetails.value.power_type || 'manual',
+        powerDriver: powerParameters.value?.power_driver || 'LAN_2_0',
+        powerBootType: powerParameters.value?.power_boot_type || 'auto',
+        powerIpAddress: powerParameters.value?.power_address || '',
+        powerUser: powerParameters.value?.power_user || '',
+        powerPassword: '', // 보안을 위해 비워둠
+        powerKgBmcKey: powerParameters.value?.k_g || '',
+        cipherSuiteId: powerParameters.value?.cipher_suite_id !== undefined && powerParameters.value?.cipher_suite_id !== null 
+          ? String(powerParameters.value.cipher_suite_id) 
+          : '3',
+        privilegeLevel: powerParameters.value?.privilege_level || 'OPERATOR',
+        workaroundFlags: Array.isArray(powerParameters.value?.workaround_flags) 
+          ? [...powerParameters.value.workaround_flags]
+          : (powerParameters.value?.workaround_flags 
+              ? powerParameters.value.workaround_flags.split(',').map(f => f.trim()).filter(f => f)
+              : ['opensesspriv']),
+        powerMac: powerParameters.value?.mac_address || ''
+      }
+      
+      isEditingPowerParameters.value = true
+    }
+    
+    const cancelEditingPowerParameters = () => {
+      isEditingPowerParameters.value = false
+      // 편집 데이터 초기화
+      editingPowerParameters.value = {
+        powerType: 'manual',
+        powerDriver: '',
+        powerBootType: 'auto',
+        powerIpAddress: '',
+        powerUser: '',
+        powerPassword: '',
+        powerKgBmcKey: '',
+        cipherSuiteId: '3',
+        privilegeLevel: 'OPERATOR',
+        workaroundFlags: ['opensesspriv'],
+        powerMac: ''
+      }
+    }
+    
+    const savePowerParameters = async () => {
+      if (!selectedMachineForDetails.value || !machineDetails.value) {
+        console.error('[Machine Details] No machine selected for saving power parameters')
+        return
+      }
+      
+      console.log('[Machine Details] Saving power parameters:', editingPowerParameters.value)
+      savingPowerParameters.value = true
+      
+      try {
+        const settingsStore = useSettings()
+        const settings = settingsStore.settings
+        if (!settings.maasUrl || !settings.apiKey) {
+          throw new Error('MAAS server URL and API key must be configured')
+        }
+        
+        const systemId = selectedMachineForDetails.value.id
+        const params = {
+          maasUrl: settings.maasUrl,
+          apiKey: settings.apiKey,
+          powerType: editingPowerParameters.value.powerType,
+        }
+        
+        // IPMI 파라미터는 power_type이 'ipmi'일 때만 추가
+        if (editingPowerParameters.value.powerType === 'ipmi') {
+          if (editingPowerParameters.value.powerDriver) {
+            params.powerDriver = editingPowerParameters.value.powerDriver
+          }
+          if (editingPowerParameters.value.powerBootType) {
+            params.powerBootType = editingPowerParameters.value.powerBootType
+          }
+          if (editingPowerParameters.value.powerIpAddress) {
+            params.powerIpAddress = editingPowerParameters.value.powerIpAddress
+          }
+          if (editingPowerParameters.value.powerUser) {
+            params.powerUser = editingPowerParameters.value.powerUser
+          }
+          // Password는 비어있지 않을 때만 전송 (비워두면 기존 값 유지)
+          if (editingPowerParameters.value.powerPassword) {
+            params.powerPassword = editingPowerParameters.value.powerPassword
+          }
+          if (editingPowerParameters.value.powerKgBmcKey) {
+            params.powerKgBmcKey = editingPowerParameters.value.powerKgBmcKey
+          }
+          if (editingPowerParameters.value.cipherSuiteId) {
+            params.cipherSuiteId = editingPowerParameters.value.cipherSuiteId
+          }
+          if (editingPowerParameters.value.privilegeLevel) {
+            params.privilegeLevel = editingPowerParameters.value.privilegeLevel
+          }
+          // Workaround Flags는 배열을 문자열로 변환
+          if (editingPowerParameters.value.workaroundFlags && editingPowerParameters.value.workaroundFlags.length > 0) {
+            // None('')이 포함되어 있으면 빈 문자열, 아니면 쉼표로 구분된 문자열
+            if (editingPowerParameters.value.workaroundFlags.includes('')) {
+              params.workaroundFlags = ''
+            } else {
+              params.workaroundFlags = editingPowerParameters.value.workaroundFlags.join(',')
+            }
+          }
+          if (editingPowerParameters.value.powerMac) {
+            params.powerMac = editingPowerParameters.value.powerMac
+          }
+        }
+        
+        const response = await axios.put(`http://localhost:8081/api/machines/${systemId}/power-parameters`, null, { params })
+        
+        if (response.data.success) {
+          console.log('[Machine Details] Power parameters saved successfully')
+          
+          // Power Type이 변경되었는지 확인
+          const originalPowerType = machineDetails.value?.power_type
+          const newPowerType = editingPowerParameters.value.powerType
+          if (originalPowerType !== newPowerType) {
+            powerTypeChanged.value = true
+            console.log(`[Machine Details] Power type changed from ${originalPowerType} to ${newPowerType}`)
+          }
+          
+          // 저장 성공 후 편집 모드 종료
+          isEditingPowerParameters.value = false
+          
+          // Machine details와 power parameters 다시 로드
+          await showMachineDetails(selectedMachineForDetails.value)
+        } else {
+          throw new Error(response.data.error || 'Failed to save power parameters')
+        }
+      } catch (err) {
+        console.error('[Machine Details] Error saving power parameters:', err)
+        const errorMessage = err.response?.data?.error || err.message || 'Failed to save power parameters'
+        alert('Error saving power parameters: ' + errorMessage)
+      } finally {
+        savingPowerParameters.value = false
+      }
+    }
+    
+    // Watch editingPowerParameters.workaroundFlags to handle "None" option
+    watch(() => editingPowerParameters.value.workaroundFlags, (newFlags, oldFlags) => {
+      if (!oldFlags) return
+      
+      // If "None" (empty string) is selected, clear all other options
+      if (newFlags.includes('')) {
+        editingPowerParameters.value.workaroundFlags = ['']
+      } 
+      // If any other option is selected, remove "None"
+      else if (oldFlags.includes('') && newFlags.length > 0) {
+        editingPowerParameters.value.workaroundFlags = newFlags.filter(flag => flag !== '')
+      }
+    }, { deep: true })
+    
+    // Handle wheel event in modal to prevent parent scroll
+    const handleModalWheel = (event) => {
+      const modalContent = event.currentTarget
+      const scrollableContent = modalContent.querySelector('.details-section')
+      
+      if (!scrollableContent) return
+      
+      const { scrollTop, scrollHeight, clientHeight } = scrollableContent
+      const isAtTop = scrollTop === 0
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 1
+      
+      // If scrolling up and already at top, prevent default
+      if (event.deltaY < 0 && isAtTop) {
+        event.preventDefault()
+        return
+      }
+      
+      // If scrolling down and already at bottom, prevent default
+      if (event.deltaY > 0 && isAtBottom) {
+        event.preventDefault()
+        return
+      }
+      
+      // Otherwise, allow scrolling within the modal
+      scrollableContent.scrollTop += event.deltaY
+      event.preventDefault()
     }
     
     const loadMachineEvents = async (systemId) => {
@@ -1438,7 +2521,14 @@ export default {
       }
     }
     
-    const closeMachineDetailsModal = () => {
+    const closeMachineDetailsModal = async () => {
+      // Power Type이 변경되었으면 머신 목록 리로드
+      if (powerTypeChanged.value) {
+        console.log('[Machine Details] Power type was changed, reloading machines list')
+        await loadMachines()
+        powerTypeChanged.value = false
+      }
+      
       showMachineDetailsModal.value = false
       selectedMachineForDetails.value = null
       machineDetails.value = null
@@ -1672,11 +2762,11 @@ export default {
           const normalizedIps = normalizeIpAddresses(machine.ip_addresses)
           const normalizedMacs = normalizeMacAddresses(machine.mac_addresses)
           return (
-            (machine.hostname && machine.hostname.toLowerCase().includes(query)) ||
+          (machine.hostname && machine.hostname.toLowerCase().includes(query)) ||
             (normalizedIps.length > 0 && normalizedIps.some(ip => ip && ip.toLowerCase().includes(query))) ||
             (normalizedMacs.length > 0 && normalizedMacs.some(mac => mac && mac.toLowerCase().includes(query))) ||
-            machine.id.toString().includes(query)
-          )
+          machine.id.toString().includes(query)
+        )
         })
       }
       
@@ -1821,25 +2911,25 @@ export default {
             })
             
             return {
-              id: machine.system_id,
-              hostname: machine.hostname,
+            id: machine.system_id,
+            hostname: machine.hostname,
               status: getStatusName(machine.status_name || machine.status),
-              status_message: machine.status_message,
+            status_message: machine.status_message,
               osystem: machine.osystem, // OS 이름 (예: 'ubuntu')
               distro_series: machine.distro_series, // 배포판 시리즈 (예: 'noble', 'jammy')
               ip_addresses: normalizedIps,
               mac_addresses: macAddresses,
-              architecture: machine.architecture,
-              cpu_count: machine.cpu_count || 0,
-              memory: machine.memory || 0,
+            architecture: machine.architecture,
+            cpu_count: machine.cpu_count || 0,
+            memory: machine.memory || 0,
               disk_count: machine.blockdevice_set?.length || 0,
               storage: calculateStorage(machine.blockdevice_set),
-              power_state: machine.power_state,
+            power_state: machine.power_state,
               power_type: machine.power_type || 'Manual',
-              owner: machine.owner,
-              tags: machine.tag_names || [],
-              pool: machine.pool?.name || 'default',
-              zone: machine.zone?.name || 'default',
+            owner: machine.owner,
+            tags: machine.tag_names || [],
+            pool: machine.pool?.name || 'default',
+            zone: machine.zone?.name || 'default',
               fabric: fabricName,
               interface_set: machine.interface_set || [] // 네트워크 인터페이스 정보 저장
             }
@@ -1912,6 +3002,78 @@ export default {
       }
       const mb = storageBytes / (1024 * 1024)
       return `${mb.toFixed(0)} MiB`
+    }
+    
+    const formatPowerState = (powerState) => {
+      if (!powerState) return 'Unknown'
+      return powerState.charAt(0).toUpperCase() + powerState.slice(1).toLowerCase()
+    }
+    
+    const getPowerStateClass = (powerState) => {
+      if (!powerState) return 'power-led-unknown'
+      const state = powerState.toLowerCase()
+      if (state === 'on') return 'power-led-on'
+      if (state === 'off') return 'power-led-off'
+      return 'power-led-unknown'
+    }
+    
+    const formatPowerType = (powerType) => {
+      if (!powerType) return 'Manual'
+      const type = powerType.toLowerCase()
+      if (type === 'ipmi') return 'IPMI'
+      if (type === 'unknown') return 'Unknown'
+      return powerType.charAt(0).toUpperCase() + powerType.slice(1).toLowerCase()
+    }
+    
+    const formatPowerDriver = (driver) => {
+      if (!driver) return '-'
+      const driverMap = {
+        'LAN': 'LAN [IPMI 1.5]',
+        'LAN_2_0': 'LAN_2_0 [IPMI 2.0]'
+      }
+      return driverMap[driver] || driver
+    }
+    
+    const formatPowerBootType = (bootType) => {
+      if (!bootType) return '-'
+      const bootTypeMap = {
+        'auto': 'Automatic',
+        'legacy': 'Legacy boot',
+        'efi': 'EFI boot'
+      }
+      return bootTypeMap[bootType] || bootType
+    }
+    
+    const formatCipherSuiteId = (cipherSuiteId) => {
+      if (cipherSuiteId === undefined || cipherSuiteId === null || cipherSuiteId === '') {
+        return 'freeipmi-tools default'
+      }
+      const cipherSuiteMap = {
+        '17': '17 - HMAC-SHA256::HMAC_SHA256_128::AES-CBC-128',
+        '3': '3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128',
+        '8': '8 - HMAC-MD5::HMAC-MD5-128::AES-CBC-128',
+        '12': '12 - HMAC-MD5::MD5-128::AES-CBC-128'
+      }
+      const key = String(cipherSuiteId)
+      return cipherSuiteMap[key] || cipherSuiteId
+    }
+    
+    const formatPrivilegeLevel = (privilegeLevel) => {
+      if (!privilegeLevel) return '-'
+      const privilegeLevelMap = {
+        'USER': 'User',
+        'OPERATOR': 'Operator',
+        'ADMIN': 'Administrator'
+      }
+      return privilegeLevelMap[privilegeLevel] || privilegeLevel
+    }
+    
+    const formatWorkaroundFlags = (flags) => {
+      if (!flags) return '-'
+      if (Array.isArray(flags)) {
+        return flags.filter(f => f !== '' && f !== null && f !== undefined).join(', ') || '-'
+      }
+      return flags
     }
     
     const getStatusName = (statusCode) => {
@@ -2398,10 +3560,42 @@ export default {
         macAddresses: '',
         powerType: 'manual',
         commission: 'false',
-        description: ''
+        description: '',
+        // IPMI fields
+        powerDriver: 'LAN_2_0',
+        powerBootType: 'auto',
+        powerIpAddress: '',
+        powerUser: '',
+        powerPassword: '',
+        powerKgBmcKey: '',
+        cipherSuiteId: '3',
+        privilegeLevel: 'OPERATOR',
+        workaroundFlags: ['opensesspriv'],
+        powerMac: ''
       }
       macAddressError.value = ''
     }
+    
+    // Watch powerType to auto-set commission to true when IPMI is selected
+    watch(() => newMachine.value.powerType, (newPowerType) => {
+      if (newPowerType === 'ipmi') {
+        newMachine.value.commission = 'true'
+      }
+    })
+    
+    // Watch workaroundFlags to handle "None" option
+    watch(() => newMachine.value.workaroundFlags, (newFlags, oldFlags) => {
+      if (!oldFlags) return
+      
+      // If "None" (empty string) is selected, clear all other options
+      if (newFlags.includes('')) {
+        newMachine.value.workaroundFlags = ['']
+      } 
+      // If any other option is selected, remove "None"
+      else if (oldFlags.includes('') && newFlags.length > 0) {
+        newMachine.value.workaroundFlags = newFlags.filter(flag => flag !== '')
+      }
+    }, { deep: true })
     
     const validateMacAddress = () => {
       const mac = newMachine.value.macAddresses.trim()
@@ -2442,6 +3636,46 @@ export default {
         formData.append('commission', newMachine.value.commission)
         if (newMachine.value.description) {
           formData.append('description', newMachine.value.description)
+        }
+        
+        // Add IPMI parameters if power type is IPMI
+        if (newMachine.value.powerType === 'ipmi') {
+          // Default values are always included
+          if (newMachine.value.powerDriver && newMachine.value.powerDriver.trim()) {
+            formData.append('powerDriver', newMachine.value.powerDriver.trim())
+          }
+          if (newMachine.value.powerBootType && newMachine.value.powerBootType.trim()) {
+            formData.append('powerBootType', newMachine.value.powerBootType.trim())
+          }
+          // Optional fields - only include if not empty
+          if (newMachine.value.powerIpAddress && newMachine.value.powerIpAddress.trim()) {
+            formData.append('powerIpAddress', newMachine.value.powerIpAddress.trim())
+          }
+          if (newMachine.value.powerUser && newMachine.value.powerUser.trim()) {
+            formData.append('powerUser', newMachine.value.powerUser.trim())
+          }
+          if (newMachine.value.powerPassword && newMachine.value.powerPassword.trim()) {
+            formData.append('powerPassword', newMachine.value.powerPassword.trim())
+          }
+          if (newMachine.value.powerKgBmcKey && newMachine.value.powerKgBmcKey.trim()) {
+            formData.append('powerKgBmcKey', newMachine.value.powerKgBmcKey.trim())
+          }
+          if (newMachine.value.cipherSuiteId !== undefined && newMachine.value.cipherSuiteId !== null && String(newMachine.value.cipherSuiteId).trim()) {
+            formData.append('cipherSuiteId', String(newMachine.value.cipherSuiteId).trim())
+          }
+          if (newMachine.value.privilegeLevel && newMachine.value.privilegeLevel.trim()) {
+            formData.append('privilegeLevel', newMachine.value.privilegeLevel.trim())
+          }
+          if (newMachine.value.workaroundFlags && newMachine.value.workaroundFlags.length > 0) {
+            // Workaround Flags는 배열이므로 쉼표로 구분된 문자열로 변환
+            const flagsStr = newMachine.value.workaroundFlags.filter(f => f !== '' && f !== null && f !== undefined).join(',')
+            if (flagsStr && flagsStr.trim()) {
+              formData.append('workaroundFlags', flagsStr.trim())
+            }
+          }
+          if (newMachine.value.powerMac && newMachine.value.powerMac.trim()) {
+            formData.append('powerMac', newMachine.value.powerMac.trim())
+          }
         }
         const apiParams = settingsStore.getApiParams.value
         formData.append('maasUrl', apiParams.maasUrl)
@@ -4747,7 +5981,7 @@ export default {
               status_message: machineData.status_message,
               osystem: machineData.osystem || machines.value[machineIndex].osystem,
               distro_series: machineData.distro_series || machines.value[machineIndex].distro_series,
-              power_state: machineData.power_state,
+              power_state: machineData.power_state || machines.value[machineIndex].power_state,
               power_type: machineData.power_type || machines.value[machineIndex].power_type || 'Manual',
               hostname: machineData.hostname,
               ip_addresses: finalIps,
@@ -4879,6 +6113,14 @@ export default {
         totalPages,
         formatMemory,
         formatStorage,
+        formatPowerState,
+        formatPowerType,
+        getPowerStateClass,
+        formatPowerDriver,
+        formatPowerBootType,
+        formatCipherSuiteId,
+        formatPrivilegeLevel,
+        formatWorkaroundFlags,
         extractMacAddresses,
         extractIpAddresses,
         normalizeIpAddresses,
@@ -4976,6 +6218,17 @@ export default {
         machineEvents,
         loadingEvents,
         loadMachineEvents,
+        powerParameters,
+        loadingPowerParameters,
+        powerParametersError,
+        loadMachinePowerParameters,
+        isEditingPowerParameters,
+        editingPowerParameters,
+        savingPowerParameters,
+        startEditingPowerParameters,
+        cancelEditingPowerParameters,
+        savePowerParameters,
+        handleModalWheel,
         showMachineDetails,
         closeMachineDetailsModal,
         modalPosition,
@@ -5383,6 +6636,32 @@ export default {
 .power-status {
   font-size: 0.75rem;
   color: #495057;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.power-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.power-led-on {
+  background-color: #28a745;
+  box-shadow: 0 0 4px rgba(40, 167, 69, 0.6);
+}
+
+.power-led-off {
+  background-color: #6c757d;
+  box-shadow: 0 0 2px rgba(108, 117, 125, 0.4);
+}
+
+.power-led-unknown {
+  background-color: #ffc107;
+  box-shadow: 0 0 2px rgba(255, 193, 7, 0.4);
 }
 
 .power-type {
@@ -5911,6 +7190,119 @@ export default {
   font-size: 0.9rem;
 }
 
+.checkbox-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  background-color: #f8f9fa;
+}
+
+@media (max-width: 1000px) {
+  .checkbox-group {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .checkbox-group {
+    grid-template-columns: 1fr;
+  }
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 400;
+  color: #495057;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.form-checkbox {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.ipmi-fields-group {
+  margin: 1.5rem 0;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  background-color: #f8f9fa;
+  overflow: hidden;
+}
+
+.ipmi-fields-header {
+  padding: 0.75rem 1rem;
+  background-color: #e9ecef;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.ipmi-fields-header label {
+  margin: 0;
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.95rem;
+}
+
+.ipmi-fields-content {
+  padding: 1rem 1.5rem;
+}
+
+.ipmi-fields-content .form-group {
+  margin-bottom: 1rem;
+}
+
+.ipmi-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem 1.5rem;
+}
+
+.ipmi-edit-grid .form-group-full-width {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1200px) {
+  .ipmi-edit-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  .ipmi-edit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ipmi-fields-content .form-group:last-child {
+  margin-bottom: 0;
+}
+
+.power-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.power-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #dee2e6;
+}
+
+.btn-sm {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
 .form-input,
 .form-select,
 .form-textarea {
@@ -6236,8 +7628,8 @@ export default {
 
 .details-tab-content {
   padding: 1.5rem;
-  min-height: 500px; /* Hardware 탭 크기에 맞춘 고정 높이 */
-  max-height: 500px;
+  min-height: 600px; /* Power 탭 편집 모드를 포함한 고정 높이 */
+  max-height: 600px;
   overflow: hidden; /* 기본적으로 스크롤바 숨김 */
   box-sizing: border-box; /* padding 포함한 크기 계산 */
   display: flex;
@@ -6246,13 +7638,22 @@ export default {
 }
 
 .details-section {
-  min-height: 500px; /* 모든 탭의 섹션 높이 통일 */
-  height: 500px; /* 고정 높이 */
+  min-height: 600px; /* 모든 탭의 섹션 높이 통일 (Power 탭 편집 모드 포함) */
+  height: 600px; /* 고정 높이 */
   overflow-y: hidden; /* 기본적으로 스크롤바 숨김 */
   box-sizing: border-box; /* padding 포함한 크기 계산 */
   flex: 1 1 auto; /* 부모 컨테이너의 남은 공간 채우기 */
   min-height: 0; /* flex item이 부모보다 작아질 수 있도록 */
   max-height: 100%; /* 부모 컨테이너를 넘지 않도록 */
+}
+
+.details-section-power {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  height: auto;
+  padding-bottom: 0.5rem;
 }
 
 /* Network 탭은 인터페이스가 많을 수 있으므로 스크롤 허용 */

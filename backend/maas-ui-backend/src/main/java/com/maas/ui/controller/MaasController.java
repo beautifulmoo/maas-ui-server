@@ -144,6 +144,26 @@ public class MaasController {
     }
     
     /**
+     * 특정 머신의 power parameters 정보를 가져옵니다.
+     */
+    @GetMapping("/machines/{systemId}/power-parameters")
+    public Mono<ResponseEntity<Map<String, Object>>> getMachinePowerParameters(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.getMachinePowerParameters(maasUrl, apiKey, systemId)
+                .map(ResponseEntity::ok)
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("error", "Failed to fetch machine power parameters")));
+    }
+    
+    /**
      * MAAS 서버 연결을 테스트합니다.
      */
     @GetMapping("/test-connection")
@@ -185,7 +205,18 @@ public class MaasController {
             @RequestParam String macAddresses,
             @RequestParam(defaultValue = "manual") String powerType,
             @RequestParam(defaultValue = "false") String commission,
-            @RequestParam(required = false) String description) {
+            @RequestParam(required = false) String description,
+            // IPMI parameters
+            @RequestParam(required = false) String powerDriver,
+            @RequestParam(required = false) String powerBootType,
+            @RequestParam(required = false) String powerIpAddress,
+            @RequestParam(required = false) String powerUser,
+            @RequestParam(required = false) String powerPassword,
+            @RequestParam(required = false) String powerKgBmcKey,
+            @RequestParam(required = false) String cipherSuiteId,
+            @RequestParam(required = false) String privilegeLevel,
+            @RequestParam(required = false) String workaroundFlags,
+            @RequestParam(required = false) String powerMac) {
         
         if (!authService.isValidApiKey(apiKey)) {
             return Mono.just(ResponseEntity.badRequest()
@@ -193,7 +224,9 @@ public class MaasController {
         }
         
         return maasApiService.addMachine(maasUrl, apiKey, hostname, architecture, 
-                macAddresses, powerType, commission, description)
+                macAddresses, powerType, commission, description,
+                powerDriver, powerBootType, powerIpAddress, powerUser, powerPassword,
+                powerKgBmcKey, cipherSuiteId, privilegeLevel, workaroundFlags, powerMac)
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to add machine")));
@@ -438,6 +471,39 @@ public class MaasController {
                     errorResponse.put("error", "Failed to fetch events: " + e.getMessage());
                     return Mono.just(ResponseEntity.status(500).body(errorResponse));
                 });
+    }
+    
+    /**
+     * 머신의 Power 파라미터를 업데이트합니다.
+     */
+    @PutMapping("/machines/{systemId}/power-parameters")
+    public Mono<ResponseEntity<Map<String, Object>>> updateMachinePowerParameters(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam String powerType,
+            @RequestParam(required = false) String powerDriver,
+            @RequestParam(required = false) String powerBootType,
+            @RequestParam(required = false) String powerIpAddress,
+            @RequestParam(required = false) String powerUser,
+            @RequestParam(required = false) String powerPassword,
+            @RequestParam(required = false) String powerKgBmcKey,
+            @RequestParam(required = false) String cipherSuiteId,
+            @RequestParam(required = false) String privilegeLevel,
+            @RequestParam(required = false) String workaroundFlags,
+            @RequestParam(required = false) String powerMac) {
+        return maasApiService.updateMachinePowerParameters(maasUrl, apiKey, systemId, powerType,
+                powerDriver, powerBootType, powerIpAddress, powerUser, powerPassword,
+                powerKgBmcKey, cipherSuiteId, privilegeLevel, workaroundFlags, powerMac)
+                .map(result -> {
+                    if (Boolean.TRUE.equals(result.get("success"))) {
+                        return ResponseEntity.ok(result);
+                    } else {
+                        return ResponseEntity.status(500).body(result);
+                    }
+                })
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to update machine power parameters")));
     }
     
     /**

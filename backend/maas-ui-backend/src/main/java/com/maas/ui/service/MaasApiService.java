@@ -354,21 +354,80 @@ public class MaasApiService {
      * @param powerType 전원 타입
      * @param commission 커미셔닝 여부
      * @param description 설명 (선택사항)
+     * @param powerDriver Power Driver (IPMI)
+     * @param powerBootType Power Boot Type (IPMI)
+     * @param powerIpAddress IP Address (IPMI)
+     * @param powerUser Power User (IPMI)
+     * @param powerPassword Power Password (IPMI)
+     * @param powerKgBmcKey K_g BMC key (IPMI)
+     * @param cipherSuiteId Cipher Suite ID (IPMI)
+     * @param privilegeLevel Privilege Level (IPMI)
+     * @param workaroundFlags Workaround Flags (IPMI)
+     * @param powerMac Power MAC (IPMI)
      * @return 머신 추가 결과
      */
     public Mono<Map<String, Object>> addMachine(String maasUrl, String apiKey, 
             String hostname, String architecture, String macAddresses, 
-            String powerType, String commission, String description) {
+            String powerType, String commission, String description,
+            String powerDriver, String powerBootType, String powerIpAddress,
+            String powerUser, String powerPassword, String powerKgBmcKey,
+            String cipherSuiteId, String privilegeLevel, String workaroundFlags,
+            String powerMac) {
         String authHeader = authService.generateAuthHeader(apiKey);
         String url = maasUrl + "/MAAS/api/2.0/machines/";
+        
+        MultiValueMap<String, String> formData = createFormData(hostname, architecture, macAddresses, 
+                powerType, commission, description,
+                powerDriver, powerBootType, powerIpAddress, powerUser, powerPassword,
+                powerKgBmcKey, cipherSuiteId, privilegeLevel, workaroundFlags, powerMac);
+        
+        // Log form data for debugging - detailed logging
+        System.err.println("========== Add Machine Request ==========");
+        System.err.println("URL: " + url);
+        System.err.println("Form Data Keys: " + formData.keySet());
+        for (String key : formData.keySet()) {
+            System.err.println("  " + key + " = " + formData.getFirst(key));
+        }
+        System.err.println("==========================================");
         
         return webClient.post()
                 .uri(url)
                 .header("Authorization", authHeader)
                 .header("Accept", "application/json")
-                .bodyValue(createFormData(hostname, architecture, macAddresses, 
-                        powerType, commission, description))
+                .body(BodyInserters.fromFormData(formData))
                 .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    System.err.println("========== Add Machine API Error ==========");
+                    System.err.println("Error Status: " + response.statusCode());
+                    System.err.println("Error Headers: " + response.headers().asHttpHeaders());
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.err.println("Error Response Body (length: " + errorBody.length() + "):");
+                                System.err.println(errorBody);
+                                // Print each character if it's short
+                                if (errorBody.length() < 200) {
+                                    byte[] bytes = errorBody.getBytes();
+                                    StringBuilder hex = new StringBuilder();
+                                    for (byte b : bytes) {
+                                        hex.append(String.format("%02x ", b));
+                                    }
+                                    System.err.println("Error Body (hex): " + hex.toString());
+                                }
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    System.err.println("Parsed Error Message: " + errorMessage);
+                                    System.err.println("==========================================");
+                                    return Mono.<RuntimeException>error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    System.err.println("Error parsing JSON: " + e.getMessage());
+                                    System.err.println("Raw Error Body: " + errorBody);
+                                    System.err.println("==========================================");
+                                    return Mono.<RuntimeException>error(new RuntimeException(errorBody));
+                                }
+                            })
+                            .cast(Throwable.class);
+                })
                 .bodyToMono(String.class)
                 .timeout(Duration.ofSeconds(30))
                 .map(responseBody -> {
@@ -388,6 +447,11 @@ public class MaasApiService {
                     }
                 })
                 .onErrorResume(throwable -> {
+                    System.err.println("========== Add Machine Error (onErrorResume) ==========");
+                    System.err.println("Error Message: " + throwable.getMessage());
+                    System.err.println("Error Class: " + throwable.getClass().getName());
+                    throwable.printStackTrace();
+                    System.err.println("========================================================");
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("success", false);
                     errorResult.put("error", "API call failed: " + throwable.getMessage());
@@ -447,19 +511,62 @@ public class MaasApiService {
     /**
      * 폼 데이터를 생성합니다.
      */
-    private Map<String, String> createFormData(String hostname, String architecture, 
-            String macAddresses, String powerType, String commission, String description) {
-        Map<String, String> formData = new HashMap<>();
+    private MultiValueMap<String, String> createFormData(String hostname, String architecture, 
+            String macAddresses, String powerType, String commission, String description,
+            String powerDriver, String powerBootType, String powerIpAddress,
+            String powerUser, String powerPassword, String powerKgBmcKey,
+            String cipherSuiteId, String privilegeLevel, String workaroundFlags,
+            String powerMac) {
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         
         if (hostname != null && !hostname.trim().isEmpty()) {
-            formData.put("hostname", hostname.trim());
+            formData.add("hostname", hostname.trim());
         }
-        formData.put("architecture", architecture);
-        formData.put("mac_addresses", macAddresses);
-        formData.put("power_type", powerType);
-        formData.put("commission", commission);
+        formData.add("architecture", architecture);
+        formData.add("mac_addresses", macAddresses);
+        formData.add("power_type", powerType);
+        formData.add("commission", commission);
         if (description != null && !description.trim().isEmpty()) {
-            formData.put("description", description.trim());
+            formData.add("description", description.trim());
+        }
+        
+        // Add IPMI parameters only if power type is "ipmi"
+        if ("ipmi".equals(powerType)) {
+            // Default values are always included (powerDriver, powerBootType, cipherSuiteId, privilegeLevel, workaroundFlags)
+            if (powerDriver != null && !powerDriver.trim().isEmpty()) {
+                formData.add("power_parameters_power_driver", powerDriver.trim());
+            }
+            if (powerBootType != null && !powerBootType.trim().isEmpty()) {
+                formData.add("power_parameters_power_boot_type", powerBootType.trim());
+            }
+            // Optional fields - only include if not empty (powerIpAddress, powerUser, powerPassword, powerKgBmcKey, powerMac)
+            if (powerIpAddress != null && !powerIpAddress.trim().isEmpty()) {
+                formData.add("power_parameters_power_address", powerIpAddress.trim());
+            }
+            if (powerUser != null && !powerUser.trim().isEmpty()) {
+                formData.add("power_parameters_power_user", powerUser.trim());
+            }
+            if (powerPassword != null && !powerPassword.trim().isEmpty()) {
+                formData.add("power_parameters_power_pass", powerPassword.trim());
+            }
+            // K_g BMC key - only include if not empty
+            if (powerKgBmcKey != null && !powerKgBmcKey.trim().isEmpty()) {
+                formData.add("power_parameters_k_g", powerKgBmcKey.trim());
+            }
+            // Default value exists, but only include if not empty
+            if (cipherSuiteId != null && !cipherSuiteId.trim().isEmpty()) {
+                formData.add("power_parameters_cipher_suite_id", cipherSuiteId.trim());
+            }
+            if (privilegeLevel != null && !privilegeLevel.trim().isEmpty()) {
+                formData.add("power_parameters_privilege_level", privilegeLevel.trim());
+            }
+            if (workaroundFlags != null && !workaroundFlags.trim().isEmpty()) {
+                formData.add("power_parameters_workaround_flags", workaroundFlags.trim());
+            }
+            // Power MAC - only include if not empty
+            if (powerMac != null && !powerMac.trim().isEmpty()) {
+                formData.add("power_parameters_mac_address", powerMac.trim());
+            }
         }
         
         return formData;
@@ -928,6 +1035,49 @@ public class MaasApiService {
     }
     
     /**
+     * MAAS 서버에서 특정 머신의 power parameters 정보를 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return power parameters 정보가 담긴 Map
+     */
+    public Mono<Map<String, Object>> getMachinePowerParameters(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-power_parameters";
+        
+        System.out.println("Get Machine Power Parameters - URL: " + url);
+        System.out.println("Get Machine Power Parameters - systemId: " + systemId);
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Power Parameters API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = objectMapper.convertValue(jsonNode, Map.class);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Power Parameters JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.out.println("Power Parameters API call failed: " + e.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("error", "Failed to fetch power parameters: " + e.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
      * MAAS 서버에서 특정 머신의 block devices 정보를 가져옵니다.
      * 
      * @param maasUrl MAAS 서버 URL
@@ -1149,5 +1299,165 @@ public class MaasApiService {
                     }
                     return Mono.just(new ArrayList<Map<String, Object>>());
                 });
+    }
+    
+    /**
+     * MAAS 서버에서 머신의 Power 파라미터를 업데이트합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @param powerType 전원 타입
+     * @param powerDriver Power Driver (IPMI)
+     * @param powerBootType Power Boot Type (IPMI)
+     * @param powerIpAddress IP Address (IPMI)
+     * @param powerUser Power User (IPMI)
+     * @param powerPassword Power Password (IPMI)
+     * @param powerKgBmcKey K_g BMC key (IPMI)
+     * @param cipherSuiteId Cipher Suite ID (IPMI)
+     * @param privilegeLevel Privilege Level (IPMI)
+     * @param workaroundFlags Workaround Flags (IPMI)
+     * @param powerMac Power MAC (IPMI)
+     * @return 업데이트 결과
+     */
+    public Mono<Map<String, Object>> updateMachinePowerParameters(String maasUrl, String apiKey, 
+            String systemId, String powerType,
+            String powerDriver, String powerBootType, String powerIpAddress,
+            String powerUser, String powerPassword, String powerKgBmcKey,
+            String cipherSuiteId, String privilegeLevel, String workaroundFlags,
+            String powerMac) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/";
+        
+        MultiValueMap<String, String> formData = createPowerParametersFormData(powerType,
+                powerDriver, powerBootType, powerIpAddress, powerUser, powerPassword,
+                powerKgBmcKey, cipherSuiteId, privilegeLevel, workaroundFlags, powerMac);
+        
+        // Log form data for debugging
+        System.out.println("========== Update Machine Power Parameters Request ==========");
+        System.out.println("URL: " + url);
+        System.out.println("System ID: " + systemId);
+        System.out.println("Form Data Keys: " + formData.keySet());
+        for (String key : formData.keySet()) {
+            System.out.println("  " + key + " = " + formData.getFirst(key));
+        }
+        System.out.println("==============================================================");
+        
+        return webClient.put()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    System.err.println("========== Update Machine Power Parameters API Error ==========");
+                    System.err.println("Error Status: " + response.statusCode());
+                    System.err.println("Error Headers: " + response.headers().asHttpHeaders());
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.err.println("Error Response Body (length: " + errorBody.length() + "):");
+                                System.err.println(errorBody);
+                                if (errorBody.length() < 200) {
+                                    byte[] bytes = errorBody.getBytes();
+                                    StringBuilder hex = new StringBuilder();
+                                    for (byte b : bytes) {
+                                        hex.append(String.format("%02x ", b));
+                                    }
+                                    System.err.println("Error Body (hex): " + hex.toString());
+                                }
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    System.err.println("Parsed Error Message: " + errorMessage);
+                                    System.err.println("==========================================");
+                                    return Mono.<RuntimeException>error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    System.err.println("Error parsing JSON: " + e.getMessage());
+                                    System.err.println("Raw Error Body: " + errorBody);
+                                    System.err.println("==========================================");
+                                    return Mono.<RuntimeException>error(new RuntimeException(errorBody));
+                                }
+                            })
+                            .cast(Throwable.class);
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Update Machine Power Parameters API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> result = new HashMap<>();
+                        result.put("success", true);
+                        result.put("data", jsonNode);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Update Machine Power Parameters JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "JSON parsing error: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.err.println("========== Update Machine Power Parameters Error (onErrorResume) ==========");
+                    System.err.println("Error Message: " + throwable.getMessage());
+                    System.err.println("Error Class: " + throwable.getClass().getName());
+                    throwable.printStackTrace();
+                    System.err.println("========================================================");
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    errorResult.put("error", "API call failed: " + throwable.getMessage());
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * Power 파라미터용 폼 데이터를 생성합니다.
+     */
+    private MultiValueMap<String, String> createPowerParametersFormData(String powerType,
+            String powerDriver, String powerBootType, String powerIpAddress,
+            String powerUser, String powerPassword, String powerKgBmcKey,
+            String cipherSuiteId, String privilegeLevel, String workaroundFlags,
+            String powerMac) {
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        
+        // Always include power_type
+        formData.add("power_type", powerType);
+        
+        // Add IPMI parameters only if power type is "ipmi"
+        if ("ipmi".equals(powerType)) {
+            if (powerDriver != null && !powerDriver.trim().isEmpty()) {
+                formData.add("power_parameters_power_driver", powerDriver.trim());
+            }
+            if (powerBootType != null && !powerBootType.trim().isEmpty()) {
+                formData.add("power_parameters_power_boot_type", powerBootType.trim());
+            }
+            if (powerIpAddress != null && !powerIpAddress.trim().isEmpty()) {
+                formData.add("power_parameters_power_address", powerIpAddress.trim());
+            }
+            if (powerUser != null && !powerUser.trim().isEmpty()) {
+                formData.add("power_parameters_power_user", powerUser.trim());
+            }
+            if (powerPassword != null && !powerPassword.trim().isEmpty()) {
+                formData.add("power_parameters_power_pass", powerPassword.trim());
+            }
+            if (powerKgBmcKey != null && !powerKgBmcKey.trim().isEmpty()) {
+                formData.add("power_parameters_k_g", powerKgBmcKey.trim());
+            }
+            if (cipherSuiteId != null && !cipherSuiteId.trim().isEmpty()) {
+                formData.add("power_parameters_cipher_suite_id", cipherSuiteId.trim());
+            }
+            if (privilegeLevel != null && !privilegeLevel.trim().isEmpty()) {
+                formData.add("power_parameters_privilege_level", privilegeLevel.trim());
+            }
+            if (workaroundFlags != null && !workaroundFlags.trim().isEmpty()) {
+                formData.add("power_parameters_workaround_flags", workaroundFlags.trim());
+            }
+            if (powerMac != null && !powerMac.trim().isEmpty()) {
+                formData.add("power_parameters_mac_address", powerMac.trim());
+            }
+        }
+        
+        return formData;
     }
 }
