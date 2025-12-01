@@ -254,10 +254,11 @@ public class MaasController {
     }
     
     /**
-     * 머신의 커미셔닝을 중단합니다.
+     * 머신의 커미셔닝 또는 배포를 중단합니다.
+     * MAAS API의 op-abort는 commissioning과 deploying 모두 처리합니다.
      */
     @PostMapping("/machines/{systemId}/abort")
-    public Mono<ResponseEntity<Map<String, Object>>> abortCommissioning(
+    public Mono<ResponseEntity<Map<String, Object>>> abortOperation(
             @PathVariable String systemId,
             @RequestParam String maasUrl,
             @RequestParam String apiKey) {
@@ -268,9 +269,15 @@ public class MaasController {
         }
         
         return maasApiService.abortCommissioning(maasUrl, apiKey, systemId)
-                .map(ResponseEntity::ok)
+                .map(result -> {
+                    if (Boolean.TRUE.equals(result.get("success"))) {
+                        return ResponseEntity.ok(result);
+                    } else {
+                        return ResponseEntity.status(500).body(result);
+                    }
+                })
                 .onErrorReturn(ResponseEntity.status(500)
-                        .body(Map.of("error", "Failed to abort commissioning")));
+                        .body(Map.of("success", false, "error", "Failed to abort operation")));
     }
     
     /**
@@ -297,14 +304,17 @@ public class MaasController {
     public Mono<ResponseEntity<Map<String, Object>>> deployMachine(
             @PathVariable String systemId,
             @RequestParam String maasUrl,
-            @RequestParam String apiKey) {
+            @RequestParam String apiKey,
+            @RequestParam(required = false) String os,
+            @RequestParam(required = false) String release,
+            @RequestParam(required = false) String arch) {
         
         if (!authService.isValidApiKey(apiKey)) {
             return Mono.just(ResponseEntity.badRequest()
                     .body(Map.of("error", "Invalid API key format")));
         }
         
-        return maasApiService.deployMachine(maasUrl, apiKey, systemId)
+        return maasApiService.deployMachine(maasUrl, apiKey, systemId, os, release, arch)
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to deploy machine")));
@@ -504,6 +514,27 @@ public class MaasController {
                 })
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("success", false, "error", "Failed to update machine power parameters")));
+    }
+    
+    /**
+     * Deployable OS 목록을 조회합니다.
+     */
+    @GetMapping("/deployable-os")
+    public Mono<ResponseEntity<Map<String, Object>>> getDeployableOS(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        return maasApiService.getAllDeployableOS(maasUrl, apiKey)
+                .map(osList -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("results", osList);
+                    response.put("count", osList.size());
+                    return ResponseEntity.ok(response);
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("error", "Failed to fetch deployable OS: " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+                });
     }
     
     /**

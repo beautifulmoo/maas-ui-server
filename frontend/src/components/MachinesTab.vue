@@ -189,6 +189,7 @@
           <tr 
         v-for="machine in paginatedMachines" 
         :key="machine.id"
+        :data-machine-id="machine.id"
             :class="['machine-row', { selected: selectedMachines.includes(machine.id) }]"
           >
             <td class="checkbox-col">
@@ -234,9 +235,14 @@
             </td>
             <td class="status-col">
               <div class="status-container">
-          <span :class="['status-badge', machine.status]">
-                  {{ getStatusText(machine.status) }}
-          </span>
+                <div class="status-badge-row">
+                  <span :class="['status-badge', machine.status]">
+                    {{ getStatusText(machine.status) }}
+                  </span>
+                  <span v-if="machine.status?.toLowerCase() === 'deploying' && machine.deployingOS && machine.deployingRelease" class="status-os-version">
+                    {{ getDeployingOSVersion(machine) }}
+                  </span>
+                </div>
                 <div v-if="machine.status_message && (isStatusInProgress(machine.status) || machine.status?.toLowerCase() === 'deployed')" class="status-message">
                   {{ getStatusMessage(machine) }}
                 </div>
@@ -309,24 +315,38 @@
                        >
                          Network
                        </button>
-                       <button 
-                         class="btn-small"
-                         :class="getDeployButtonClass(machine)"
-                         @click="handleDeployButtonClick(machine)"
-                         :disabled="getDeployButtonDisabled(machine)"
-                       >
-                         <span v-if="machine.status?.toLowerCase() === 'deploying'">
-                           <span v-if="abortingDeployMachines.includes(machine.id)">...</span>
-                           <span v-else>Abort</span>
+                       <div class="deploy-button-container" 
+                            @mouseenter="hoveredDeployMachine = machine.id"
+                            @mouseleave="hoveredDeployMachine = null">
+                         <button 
+                           class="btn-small"
+                           :class="getDeployButtonClass(machine)"
+                           @click="handleDeployButtonClick(machine, $event)"
+                           :disabled="getDeployButtonDisabled(machine)"
+                         >
+                           <span v-if="machine.status?.toLowerCase() === 'deploying'">
+                             <span v-if="abortingDeployMachines.includes(machine.id)">...</span>
+                             <span v-else>Abort</span>
+                           </span>
+                           <span v-else-if="machine.status?.toLowerCase() === 'deployed'">
+                             Deployed
+                           </span>
+                           <span v-else>
+                             <span v-if="deployingMachines.includes(machine.id)">...</span>
+                             <span v-else>Deploy</span>
+                           </span>
+                         </button>
+                         <span 
+                           v-if="(hoveredDeployMachine === machine.id || openDeployMenu === machine.id) && 
+                                 machine.status?.toLowerCase() !== 'deploying' && 
+                                 machine.status?.toLowerCase() !== 'deployed' &&
+                                 (machine.status?.toLowerCase() === 'ready' || machine.status?.toLowerCase() === 'allocated')"
+                           class="deploy-dropdown-icon"
+                           @click.stop="toggleDeployMenu(machine.id, $event)"
+                         >
+                           ▼
                          </span>
-                         <span v-else-if="machine.status?.toLowerCase() === 'deployed'">
-                           Deployed
-                         </span>
-                         <span v-else>
-                           <span v-if="deployingMachines.includes(machine.id)">...</span>
-                           <span v-else>Deploy</span>
-                         </span>
-                       </button>
+                       </div>
                      </div>
                    </td>
           </tr>
@@ -438,6 +458,44 @@
         >
           <span class="power-icon power-off">●</span>
           <span>Turn off</span>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Deploy OS Dropdown Menu (Teleport outside of v-for) -->
+    <Teleport to="body">
+      <div 
+        v-if="openDeployMenu && deployMenuPosition && deployMenuPosition.top !== undefined"
+        class="deploy-dropdown-menu"
+        :style="{
+          top: ((deployMenuPosition && deployMenuPosition.top) || 0) + 'px',
+          left: ((deployMenuPosition && deployMenuPosition.left) || 0) + 'px'
+        }"
+        @click.stop
+      >
+        <div class="deploy-dropdown-header">SELECT OS:</div>
+        <div 
+          v-if="loadingDeployableOS"
+          class="deploy-dropdown-item disabled"
+        >
+          Loading OS images...
+        </div>
+        <div 
+          v-else-if="deployableOSList.length === 0"
+          class="deploy-dropdown-item disabled"
+        >
+          No OS images available
+        </div>
+        <div 
+          v-else
+          v-for="os in deployableOSList"
+          :key="`${os.os}-${os.release}-${os.arches?.join(',') || ''}`"
+          class="deploy-dropdown-item"
+          :class="{ 'default': os.isDefault }"
+          @click="selectDeployOS(getMachineById(openDeployMenu), os)"
+        >
+          <span class="os-name">{{ formatOSName(os.os, os.release) }}</span>
+          <span class="os-arch" v-if="os.arches && os.arches.length > 0">({{ os.arches.join(', ') }})</span>
         </div>
       </div>
     </Teleport>
@@ -2016,6 +2074,13 @@ export default {
     const openPowerMenu = ref(null)
     const powerMenuPosition = ref({ top: 0, left: 0 })
     
+    // Deploy Menu
+    const hoveredDeployMachine = ref(null)
+    const openDeployMenu = ref(null)
+    const deployMenuPosition = ref({ top: 0, left: 0 })
+    const deployableOSList = ref([])
+    const loadingDeployableOS = ref(false)
+    
     // Action Bar Menu
     const openActionsMenu = ref(false)
     const actionsMenuPosition = ref({ top: 0, left: 0 })
@@ -3014,6 +3079,8 @@ export default {
       const state = powerState.toLowerCase()
       if (state === 'on') return 'power-led-on'
       if (state === 'off') return 'power-led-off'
+      // IPMI error 상태 감지
+      if (state === 'error' || state.includes('error')) return 'power-led-error'
       return 'power-led-unknown'
     }
     
@@ -3365,6 +3432,16 @@ export default {
       return distroSeriesMap[distroSeries.toLowerCase()] || null
     }
     
+    // Deploying 상태일 때 OS 버전 표시 (배지 옆에 표시)
+    const getDeployingOSVersion = (machine) => {
+      if (!machine.deployingOS || !machine.deployingRelease) {
+        return ''
+      }
+      const osName = machine.deployingOS.charAt(0).toUpperCase() + machine.deployingOS.slice(1)
+      const version = formatVersionForDeploying(machine.deployingOS, machine.deployingRelease)
+      return `${osName} ${version}`
+    }
+    
     // Status message를 가져오는 함수 (Deployed 상태일 때 OS 버전 표시)
     const getStatusMessage = (machine) => {
       const status = machine.status?.toLowerCase() || ''
@@ -3379,6 +3456,25 @@ export default {
       
       // 그 외의 경우 기존 status_message 반환
       return machine.status_message || ''
+    }
+    
+    // Deploying 상태에서 표시할 버전 포맷팅 (숫자만 표시)
+    const formatVersionForDeploying = (os, release) => {
+      if (!os || !release) return release || ''
+      
+      // Ubuntu release to version mapping (숫자만)
+      if (os.toLowerCase() === 'ubuntu') {
+        const versionMap = {
+          'xenial': '16.04',
+          'bionic': '18.04',
+          'focal': '20.04',
+          'jammy': '22.04',
+          'noble': '24.04'
+        }
+        return versionMap[release.toLowerCase()] || release
+      }
+      
+      return release
     }
     
     // Block Devices에서 스토리지 계산하는 함수
@@ -3914,7 +4010,18 @@ export default {
         
       } catch (err) {
         console.error('Error aborting commissioning:', err)
-        error.value = err.response?.data?.error || err.message || 'Failed to abort commissioning'
+        // 503 Service Unavailable 또는 타임아웃 에러인 경우
+        const statusCode = err.response?.status
+        let errorMessage = err.response?.data?.error || err.message || 'Failed to abort commissioning'
+        
+        if (statusCode === 503 || errorMessage.includes('timeout') || errorMessage.includes('30000') || errorMessage.includes('60000') || errorMessage.includes('Service Unavailable')) {
+          errorMessage = 'Abort operation may have timed out, but the operation might still be in progress. Refreshing machine status...'
+          // 503 에러나 타임아웃의 경우, 실제로는 성공했을 수 있으므로 일정 시간 후 상태 확인
+          setTimeout(() => {
+            loadMachines()
+          }, 2000)
+        }
+        error.value = errorMessage
       } finally {
         // Remove from aborting list
         const index = abortingMachines.value.indexOf(machine.id)
@@ -4006,13 +4113,199 @@ export default {
     }
     
     // Deploy 버튼 클릭 핸들러
-    const handleDeployButtonClick = (machine) => {
+    const handleDeployButtonClick = (machine, event) => {
+      console.log('Deploy button clicked for machine:', machine.id, machine.status)
       const status = machine.status?.toLowerCase() || ''
       if (status === 'deploying') {
         abortDeploy(machine)
-      } else {
-        deployMachine(machine)
+      } else if (status === 'ready' || status === 'allocated') {
+        // OS 선택 메뉴 표시
+        if (event) {
+          event.stopPropagation()
+        }
+        toggleDeployMenu(machine.id, event)
       }
+    }
+    
+    // Deploy OS 메뉴 토글
+    const toggleDeployMenu = async (machineId, event) => {
+      console.log('toggleDeployMenu called:', machineId, event)
+      if (openDeployMenu.value === machineId) {
+        openDeployMenu.value = null
+        deployMenuPosition.value = { top: 0, left: 0 }
+      } else {
+        // OS 목록 로드
+        if (deployableOSList.value.length === 0 && !loadingDeployableOS.value) {
+          console.log('Loading deployable OS list...')
+          await loadDeployableOS()
+        }
+        
+        // 클릭한 버튼의 위치 계산
+        let buttonRect = null
+        if (event && event.target) {
+          const deployContainer = event.target.closest('.deploy-button-container')
+          if (deployContainer) {
+            buttonRect = deployContainer.getBoundingClientRect()
+          } else {
+            // 버튼 자체를 클릭한 경우
+            const button = event.target.closest('button')
+            if (button) {
+              buttonRect = button.getBoundingClientRect()
+            }
+          }
+        }
+        
+        // event가 없거나 buttonRect를 찾지 못한 경우, DOM에서 찾기
+        if (!buttonRect) {
+          const machine = getMachineById(machineId)
+          if (machine) {
+            // DOM에서 해당 머신의 deploy-button-container 찾기
+            setTimeout(() => {
+              const allContainers = document.querySelectorAll('.deploy-button-container')
+              for (const container of allContainers) {
+                // 부모 요소에서 머신 ID 찾기
+                const row = container.closest('tr')
+                if (row) {
+                  const rowData = row.getAttribute('data-machine-id')
+                  if (rowData === machineId) {
+                    buttonRect = container.getBoundingClientRect()
+                    break
+                  }
+                }
+              }
+              
+              if (buttonRect) {
+                deployMenuPosition.value = {
+                  top: buttonRect.bottom + 4,
+                  left: buttonRect.left
+                }
+                openDeployMenu.value = machineId
+                console.log('Deploy menu opened at:', deployMenuPosition.value)
+              } else {
+                console.warn('Could not find deploy button container for machine:', machineId)
+              }
+            }, 0)
+            return
+          }
+        }
+        
+        if (buttonRect) {
+          deployMenuPosition.value = {
+            top: buttonRect.bottom + 4,
+            left: buttonRect.left
+          }
+          openDeployMenu.value = machineId
+          console.log('Deploy menu opened at:', deployMenuPosition.value)
+        } else {
+          console.warn('Could not get deploy button position')
+          openDeployMenu.value = null
+        }
+      }
+    }
+    
+    // Deployable OS 목록 로드
+    const loadDeployableOS = async () => {
+      if (loadingDeployableOS.value) return
+      
+      loadingDeployableOS.value = true
+      try {
+        const settings = settingsStore.settings
+        if (!settings.maasUrl || !settings.apiKey) {
+          console.warn('MAAS URL and API Key must be configured')
+          return
+        }
+        
+        const response = await axios.get('http://localhost:8081/api/deployable-os', {
+          params: {
+            maasUrl: settings.maasUrl,
+            apiKey: settings.apiKey
+          }
+        })
+        
+        if (response.data.results) {
+          // OS 목록 정렬 및 기본값 설정
+          const osList = response.data.results.map(os => ({
+            ...os,
+            sortKey: getOSSortKey(os.os, os.release)
+          }))
+          
+          // 정렬: OS 이름 -> release (최신순)
+          osList.sort((a, b) => {
+            if (a.os !== b.os) {
+              return a.os.localeCompare(b.os)
+            }
+            return b.sortKey - a.sortKey
+          })
+          
+          // 각 OS별로 최신 release를 기본값으로 설정
+          const osMap = new Map()
+          osList.forEach(os => {
+            const key = os.os
+            if (!osMap.has(key) || osMap.get(key).sortKey < os.sortKey) {
+              osMap.set(key, os)
+            }
+          })
+          
+          // 기본값 표시
+          deployableOSList.value = osList.map(os => ({
+            ...os,
+            isDefault: osMap.get(os.os) === os
+          }))
+        } else {
+          deployableOSList.value = []
+        }
+      } catch (err) {
+        console.error('Error loading deployable OS:', err)
+        deployableOSList.value = []
+      } finally {
+        loadingDeployableOS.value = false
+      }
+    }
+    
+    // OS 이름 포맷팅
+    const formatOSName = (os, release) => {
+      if (!os || !release) return '-'
+      
+      // Ubuntu release to version mapping
+      if (os.toLowerCase() === 'ubuntu') {
+        const versionMap = {
+          'xenial': '16.04 LTS',
+          'bionic': '18.04 LTS',
+          'focal': '20.04 LTS',
+          'jammy': '22.04 LTS',
+          'noble': '24.04 LTS'
+        }
+        const version = versionMap[release.toLowerCase()] || release
+        return `Ubuntu ${version}`
+      }
+      
+      // Capitalize first letter of OS
+      const osName = os.charAt(0).toUpperCase() + os.slice(1)
+      return `${osName} ${release}`
+    }
+    
+    // OS 정렬 키 생성 (release 기준)
+    const getOSSortKey = (os, release) => {
+      if (os.toLowerCase() === 'ubuntu') {
+        const versionMap = {
+          'xenial': 16,
+          'bionic': 18,
+          'focal': 20,
+          'jammy': 22,
+          'noble': 24
+        }
+        return versionMap[release.toLowerCase()] || 0
+      }
+      // 다른 OS는 release 문자열을 숫자로 변환 시도
+      const match = release.match(/(\d+)/)
+      return match ? parseInt(match[1]) : 0
+    }
+    
+    // OS 선택 및 배포
+    const selectDeployOS = (machine, os) => {
+      openDeployMenu.value = null
+      deployMenuPosition.value = { top: 0, left: 0 }
+      deployMachine(machine, os)
     }
     
     // Deploy 중단 함수
@@ -4046,7 +4339,18 @@ export default {
         
       } catch (err) {
         console.error('Error aborting deployment:', err)
-        error.value = err.response?.data?.error || err.message || 'Failed to abort deployment'
+        // 503 Service Unavailable 또는 타임아웃 에러인 경우
+        const statusCode = err.response?.status
+        let errorMessage = err.response?.data?.error || err.message || 'Failed to abort deployment'
+        
+        if (statusCode === 503 || errorMessage.includes('timeout') || errorMessage.includes('30000') || errorMessage.includes('60000') || errorMessage.includes('Service Unavailable')) {
+          errorMessage = 'Abort operation may have timed out, but the operation might still be in progress. Refreshing machine status...'
+          // 503 에러나 타임아웃의 경우, 실제로는 성공했을 수 있으므로 일정 시간 후 상태 확인
+          setTimeout(() => {
+            loadMachines()
+          }, 2000)
+        }
+        error.value = errorMessage
       } finally {
         // Remove from aborting list
         const index = abortingDeployMachines.value.indexOf(machine.id)
@@ -4060,10 +4364,20 @@ export default {
     const abortMachine = async (machine) => {
       const status = machine.status?.toLowerCase() || ''
       
+      // Failed deployment 상태에서는 Abort 대신 Release를 사용
+      if (isFailedDeployment(status)) {
+        console.log('Failed deployment detected, using Release instead of Abort')
+        await releaseMachine(machine, true) // skipConfirm = true
+        return
+      }
+      
       if (status === 'commissioning') {
         await abortCommissioning(machine)
       } else if (status === 'deploying') {
         await abortDeploy(machine)
+      } else {
+        console.warn(`Cannot abort machine in status: ${status}`)
+        error.value = `Cannot abort machine in ${status} state. Please use Release instead.`
       }
     }
     
@@ -4377,20 +4691,49 @@ export default {
     }
     
     // Deploy Machine
-    const deployMachine = async (machine) => {
+    const deployMachine = async (machine, os = null) => {
       if (machine.status !== 'ready' && machine.status !== 'allocated') {
         return
+      }
+      
+      // OS가 선택되지 않았고 목록이 비어있으면 로드
+      if (!os && deployableOSList.value.length === 0 && !loadingDeployableOS.value) {
+        await loadDeployableOS()
+        // 기본 OS 선택
+        const defaultOS = deployableOSList.value.find(o => o.isDefault)
+        if (defaultOS) {
+          os = defaultOS
+        } else if (deployableOSList.value.length > 0) {
+          os = deployableOSList.value[0]
+        }
+      }
+      
+      // OS가 여전히 없으면 기본값 사용
+      if (!os && deployableOSList.value.length > 0) {
+        const defaultOS = deployableOSList.value.find(o => o.isDefault)
+        os = defaultOS || deployableOSList.value[0]
       }
       
       deployingMachines.value.push(machine.id)
       
       try {
         const apiParams = settingsStore.getApiParams.value
-        const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/deploy`, null, {
-          params: {
-            maasUrl: apiParams.maasUrl,
-            apiKey: apiParams.apiKey
+        const params = {
+          maasUrl: apiParams.maasUrl,
+          apiKey: apiParams.apiKey
+        }
+        
+        // OS 파라미터 추가
+        if (os) {
+          params.os = os.os
+          params.release = os.release
+          if (os.arches && os.arches.length > 0) {
+            params.arch = os.arches[0] // 첫 번째 architecture 사용
           }
+        }
+        
+        const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/deploy`, null, {
+          params: params
         })
         
         if (response.data && response.data.success) {
@@ -4400,6 +4743,11 @@ export default {
           if (machineIndex !== -1) {
             // Update status to deploying
             machines.value[machineIndex].status = 'deploying'
+            // 배포 중인 OS 정보 저장
+            if (os) {
+              machines.value[machineIndex].deployingOS = os.os
+              machines.value[machineIndex].deployingRelease = os.release
+            }
             machines.value[machineIndex].status_message = 'Starting deployment...'
             // Status will be updated via WebSocket
           }
@@ -6062,6 +6410,11 @@ export default {
         openPowerMenu.value = null
         powerMenuPosition.value = { top: 0, left: 0 }
       }
+      // Deploy 메뉴 (개별 머신)
+      if (!event.target.closest('.deploy-button-container') && !event.target.closest('.deploy-dropdown-menu')) {
+        openDeployMenu.value = null
+        deployMenuPosition.value = { top: 0, left: 0 }
+      }
       // Status Select 메뉴
       if (!event.target.closest('.select-all-container') && !event.target.closest('.status-select-dropdown-menu')) {
         openStatusSelectMenu.value = false
@@ -6130,6 +6483,8 @@ export default {
         getStatusText,
         isStatusInProgress,
         getStatusMessage,
+        getDeployingOSVersion,
+        formatVersionForDeploying,
         getUbuntuVersionFromDistroSeries,
         calculateStorageFromBlockDevices,
         formatMemoryBytes,
@@ -6178,6 +6533,15 @@ export default {
         togglePowerMenu,
         handlePowerAction,
         getMachineById,
+        // Deploy Menu
+        hoveredDeployMachine,
+        openDeployMenu,
+        deployMenuPosition,
+        deployableOSList,
+        loadingDeployableOS,
+        toggleDeployMenu,
+        formatOSName,
+        selectDeployOS,
         // Action Bar
         openActionsMenu,
         openPowerActionMenu,
@@ -6538,20 +6902,22 @@ export default {
 }
 
 .power-col {
-  width: 100px; /* 드롭다운 메뉴를 위한 공간 확보 */
+  width: 80px; /* 드롭다운 메뉴를 위한 공간 확보 */
+  min-width: 80px;
+  max-width: 80px;
   position: relative;
 }
 
 .status-col {
-  width: 90px; /* STATUS 컬럼 줄이기 */
-  min-width: 90px;
-  max-width: 90px;
+  width: 140px; /* STATUS 컬럼 크기 증가 (OS 버전 표시를 위해) */
+  min-width: 140px;
+  max-width: 140px;
 }
 
 .owner-col {
-  width: 120px !important; /* OWNER 표시를 위해 너비 증가 */
-  min-width: 120px;
-  max-width: 120px;
+  width: 100px !important; /* OWNER 컬럼 크기 감소 */
+  min-width: 100px;
+  max-width: 100px;
 }
 
 .pool-col {
@@ -6664,6 +7030,11 @@ export default {
   box-shadow: 0 0 2px rgba(255, 193, 7, 0.4);
 }
 
+.power-led-error {
+  background-color: #dc3545;
+  box-shadow: 0 0 4px rgba(220, 53, 69, 0.6);
+}
+
 .power-type {
   font-size: 0.7rem;
   color: #6c757d;
@@ -6701,6 +7072,85 @@ export default {
   color: #495057;
   border-bottom: 1px solid #dee2e6;
   background-color: #f8f9fa;
+}
+
+.deploy-button-container {
+  position: relative;
+  display: inline-block;
+}
+
+.deploy-dropdown-icon {
+  position: absolute;
+  right: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.6rem;
+  color: #6c757d;
+  cursor: pointer;
+  padding: 2px 4px;
+  user-select: none;
+}
+
+.deploy-dropdown-icon:hover {
+  color: #495057;
+}
+
+.deploy-dropdown-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.deploy-dropdown-header {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #495057;
+  border-bottom: 1px solid #dee2e6;
+  background-color: #f8f9fa;
+}
+
+.deploy-dropdown-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background-color 0.2s;
+}
+
+.deploy-dropdown-item:hover:not(.disabled) {
+  background-color: #d0e7ff;
+}
+
+.deploy-dropdown-item.disabled {
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.deploy-dropdown-item.default {
+  font-weight: 600;
+  background-color: #e7f3ff;
+}
+
+.deploy-dropdown-item.default:hover {
+  background-color: #d0e7ff;
+}
+
+.deploy-dropdown-item .os-name {
+  flex: 1;
+}
+
+.deploy-dropdown-item .os-arch {
+  font-size: 0.75rem;
+  color: #6c757d;
+  margin-left: 8px;
 }
 
 .power-dropdown-item {
@@ -6797,6 +7247,19 @@ export default {
   cursor: pointer;
 }
 
+.status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.status-badge-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
 .status-badge {
   padding: 0.2rem 0.4rem;
   border-radius: 3px;
@@ -6804,12 +7267,22 @@ export default {
   font-weight: 500;
   text-transform: uppercase;
   display: inline-block;
+  white-space: nowrap;
 }
 
-.status-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+.status-os-version {
+  font-size: 0.65rem;
+  color: #495057;
+  font-weight: 500;
+  white-space: nowrap;
+  white-space: nowrap;
+}
+
+.status-os-version {
+  font-size: 0.65rem;
+  color: #495057;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .status-message {

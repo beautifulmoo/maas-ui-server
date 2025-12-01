@@ -27,6 +27,16 @@
       </div>
     </div>
     
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">💿</div>
+        <div class="stat-content">
+          <h3>{{ deployableOSCount }}</h3>
+          <p>Deployable OS</p>
+        </div>
+      </div>
+    </div>
+    
     <div class="loading" v-if="loading">
       <p>Loading machine statistics...</p>
     </div>
@@ -48,6 +58,7 @@ export default {
     const totalMachines = ref(0)
     const commissionedMachines = ref(0)
     const deployedMachines = ref(0)
+    const deployableOSCount = ref(0)
     const loading = ref(true)
     const error = ref(null)
     
@@ -89,14 +100,35 @@ export default {
       }
     }
     
+    const loadDeployableOSCount = async () => {
+      try {
+        const response = await axios.get('http://localhost:8081/api/deployable-os', {
+          params: getApiParams.value
+        })
+        
+        if (response.data && response.data.results && Array.isArray(response.data.results)) {
+          deployableOSCount.value = response.data.results.length
+        } else if (response.data && typeof response.data.count === 'number') {
+          deployableOSCount.value = response.data.count
+        } else {
+          deployableOSCount.value = 0
+        }
+      } catch (err) {
+        console.error('Error loading deployable OS count:', err)
+        deployableOSCount.value = 0
+      }
+    }
+    
     onMounted(() => {
       loadMachineStats()
+      loadDeployableOSCount()
     })
     
     return {
       totalMachines,
       commissionedMachines,
       deployedMachines,
+      deployableOSCount,
       loading,
       error
     }
@@ -139,6 +171,10 @@ export default {
 
 .stat-card:nth-child(3) {
   background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.stats-grid:last-child .stat-card {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
 }
 
 .stat-icon {

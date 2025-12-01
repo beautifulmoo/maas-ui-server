@@ -192,21 +192,25 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 전체 머신 수
   - 커미셔닝된 머신 수
   - 배포된 머신 수
+  - Deploy 가능한 OS 수
 - **주요 코드 파일**: 
   - `DashboardTab.vue`: UI 컴포넌트
   - `MaasController.getDashboardStats()`: API 엔드포인트
   - `MaasApiService.getAllMachines()`: MAAS API 호출
   - `MaasApiService.calculateMachineStats()`: 통계 계산
 - **내부 로직 흐름**:
-  1. 컴포넌트 마운트 시 `loadMachineStats()` 호출
+  1. 컴포넌트 마운트 시 `loadMachineStats()` 및 `loadDeployableOSCount()` 호출
   2. 백엔드 `/api/dashboard/stats` 엔드포인트 호출
   3. 백엔드가 MAAS API로부터 모든 머신 정보 조회
   4. 머신 상태별로 카운트 계산 (status 값 기반)
   5. 통계 데이터를 프론트엔드로 반환
-  6. 카드 형태로 표시
+  6. 백엔드 `/api/deployable-os` 엔드포인트 호출하여 Deploy 가능한 OS 목록 조회
+  7. OS 목록 개수를 카운트하여 Deployable OS 수 계산
+  8. 카드 형태로 표시 (머신 통계는 첫 번째 줄, Deployable OS는 두 번째 줄)
 - **에러 처리**: 
   - API 호출 실패 시 에러 메시지 표시
   - 목업 데이터로 폴백 (개발용)
+  - Deployable OS 조회 실패 시 0으로 표시
 
 ### 3.2 Machines Tab 기능
 
@@ -481,7 +485,14 @@ MachinesTab.vue (실시간 UI 업데이트)
   2. 백엔드 `/api/machines/{systemId}/abort` POST 요청
   3. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-abort` POST 요청
   4. 성공 시 버튼이 "Commission"으로 변경
-- **에러 처리**: API 오류 메시지 표시
+- **에러 처리**: 
+  - API 오류 메시지 표시
+  - 503 Service Unavailable 또는 타임아웃 에러 발생 시:
+    - "Abort operation may have timed out, but the operation might still be in progress. Refreshing machine status..." 메시지 표시
+    - 2초 후 자동으로 머신 상태 재확인 (`loadMachines()` 호출)
+- **특수 동작**:
+  - Failed Deployment 상태에서 Abort 시도 시: 자동으로 Release 작업으로 전환
+  - Deploying 상태에서 Abort 시도 시: 정상적으로 Abort 처리
 
 #### 기능명: 네트워크 설정 (Network)
 - **설명**: 머신의 네트워크 인터페이스에 VLAN 및 IP 주소 설정
@@ -548,21 +559,51 @@ MachinesTab.vue (실시간 UI 업데이트)
 
 #### 기능명: 머신 배포 (Deploy)
 - **설명**: 커미셔닝된 머신에 OS를 배포
-- **입력**: System ID
+- **입력**: 
+  - System ID
+  - OS 선택 (OS 이름, Release, Architecture)
 - **출력**: 배포 작업 시작 결과
 - **주요 코드 파일**:
-  - `MachinesTab.vue`: Deploy 버튼 클릭 핸들러
+  - `MachinesTab.vue`: Deploy 버튼 클릭 핸들러, OS 선택 드롭다운
   - `MaasController.deployMachine()`: API 엔드포인트
   - `MaasApiService.deployMachine()`: MAAS API 호출
 - **내부 로직 흐름**:
   1. "Deploy" 버튼 클릭 (Ready 또는 Allocated 상태에서만 활성화)
-  2. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
-  3. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
-  4. 성공 시 버튼이 "Deployed"로 변경
-  5. WebSocket을 통한 상태 업데이트 수신
+  2. Deploy 버튼 옆에 드롭다운 아이콘(▼) 표시 (호버 또는 메뉴 열림 시)
+  3. 드롭다운 아이콘 클릭 시 OS 선택 메뉴 표시
+  4. Deployable OS 목록 로드 (`/api/deployable-os` 호출, 최초 1회만)
+  5. OS 목록 정렬 및 기본값 설정:
+     - OS 이름별로 그룹화
+     - 각 OS별 최신 release를 기본값으로 표시 (옅은 하늘색 배경)
+     - OS 이름 → release (최신순) 정렬
+  6. 사용자가 OS 선택:
+     - 기본값 OS는 자동 선택됨
+     - 다른 OS 선택 시 해당 OS로 배포
+  7. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
+     - 요청 파라미터: `maasUrl`, `apiKey`, `os`, `release`, `arch`
+  8. 백엔드에서 Form Data 생성:
+     - `distro_series`: `os/release` 형식 (예: `ubuntu/noble`, `ubuntu/jammy`)
+     - `architecture`: 선택된 architecture (있는 경우)
+  9. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
+     - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
+     - `BodyInserters.fromFormData()` 사용
+  10. 성공 시:
+      - 버튼이 "Abort"로 변경
+      - 머신 상태가 "Deploying"으로 변경
+      - 선택된 OS 정보 저장 (`deployingOS`, `deployingRelease`)
+      - STATUS 컬럼에 OS 버전 표시 (예: "Ubuntu 24.04")
+  11. WebSocket을 통한 상태 업데이트 수신
+- **UI/UX 특징**:
+  - Deploy 버튼 옆에 드롭다운 아이콘(▼) 표시 (호버 또는 메뉴 열림 시)
+  - OS 선택 드롭다운 메뉴는 Power 드롭다운과 동일한 스타일
+  - 기본값 OS는 옅은 하늘색 배경으로 표시
+  - 마우스 호버 시 진한 하늘색 배경 (`#d0e7ff`)
+  - OS 이름과 release 표시 (예: "Ubuntu 24.04 LTS")
+  - 드롭다운 메뉴 위치는 Deploy 버튼 기준으로 계산 (position: fixed)
 - **에러 처리**:
   - 배포 불가능한 상태에서는 버튼 비활성화
   - API 오류 메시지 표시
+  - Deployable OS 목록 로드 실패 시 기본값 사용
 
 #### 기능명: Power 관리 (Power Management)
 - **설명**: 머신의 전원 상태 확인 및 전원 제어 (켜기/끄기)
@@ -588,9 +629,11 @@ MachinesTab.vue (실시간 UI 업데이트)
       - **on**: 녹색 LED (`#28a745`) + "On" 텍스트
       - **off**: 회색 LED (`#6c757d`) + "Off" 텍스트
       - **unknown**: 노란색 LED (`#ffc107`) + "Unknown" 텍스트
+      - **error/failed**: 빨간색 LED (`#dc3545`) + "Error" 텍스트 (IPMI 연결 오류 또는 전원 제어 오류 시)
     - **Power Type 표시**:
-      - `ipmi` → `IPMI` (대문자)
-      - `unknown` → `Unknown` (첫 글자 대문자)
+      - `manual` 타입은 `Manual`로 표시 (첫 글자 대문자)
+      - `ipmi` 타입은 `IPMI`로 표시 (대문자)
+      - `unknown` 타입은 `Unknown`으로 표시 (첫 글자 대문자)
       - 기타 타입도 첫 글자 대문자로 표시
   - **드롭다운 메뉴**: 호버 또는 클릭 시 표시되는 컨텍스트 메뉴
     - "TAKE ACTION:" 헤더
@@ -642,21 +685,21 @@ MachinesTab.vue (실시간 UI 업데이트)
     - Pool
     - Zone
     - Description (있는 경우)
-    - Power Type (포맷팅: ipmi → IPMI, unknown → Unknown)
+    - Power Type (manual은 Manual로, ipmi는 IPMI로, unknown은 Unknown으로 표시)
     - Power State (LED 아이콘 + 텍스트)
   - **Power 탭**: 전원 설정 정보 및 편집
     - **읽기 모드**:
-      - Power Type (포맷팅: ipmi → IPMI, manual → Manual, unknown → Unknown)
+      - Power Type (ipmi는 IPMI로, manual은 Manual로, unknown은 Unknown으로 표시)
       - Power State (LED 아이콘 + 텍스트)
       - **IPMI 타입인 경우**: IPMI 파라미터 표시
-        - Power Driver (포맷팅: LAN_2_0 → "LAN_2_0 [IPMI 2.0]")
-        - Power Boot Type (포맷팅: auto → "Automatic")
+        - Power Driver (LAN_2_0은 "LAN_2_0 [IPMI 2.0]"으로 표시)
+        - Power Boot Type (auto는 "Automatic"으로 표시)
         - IP Address
         - Power User
         - Power Password (마스킹: "••••••••")
         - K_g BMC key (없으면 "-" 표시)
-        - Cipher Suite ID (포맷팅: 3 → "3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128")
-        - Privilege Level (포맷팅: OPERATOR → "Operator")
+        - Cipher Suite ID (3은 "3 - HMAC-SHA1::HMAC-SHA1-96::AES-CBC-128"으로 표시)
+        - Privilege Level (OPERATOR는 "Operator"로 표시)
         - Workaround Flags (포맷팅된 목록)
         - Power MAC (없으면 "-" 표시)
       - **Manual 타입인 경우**: Power Type과 Power State만 표시
@@ -827,6 +870,14 @@ MachinesTab.vue (실시간 UI 업데이트)
     - 각 인터페이스 항목의 높이 자동 통일 (가장 긴 항목 기준)
     - IP Address와 Subnet을 같은 레벨의 독립적인 정보로 표시
     - 서브넷 정보 표시 형식: "Subnet: 서브넷정보" (명확한 라벨 사용)
+  - Power 탭 특화 기능:
+    - Power Type 필드를 상단에 독립적으로 배치
+    - Power Type에 따라 IPMI Configuration 필드 동적 표시/숨김
+    - 편집 모드에서 3열 그리드 레이아웃 (반응형: 2열 → 1열)
+    - Workaround Flags 체크박스는 3열 그리드 (반응형: 2열 → 1열)
+    - 편집 폼 내용이 많을 경우 내부 스크롤 가능 (부모 모달 스크롤 방지)
+    - Edit/Cancel/Save 버튼은 항상 하단에 고정 표시
+    - Power Type 변경 시 Detail 창 닫을 때 머신 목록 자동 리로드
 - **에러 처리**: API 오류 시 에러 메시지 표시
 - **성능 최적화**:
   - Block Devices 정보는 별도 API로 비동기 로드
@@ -973,9 +1024,15 @@ MachinesTab.vue (실시간 UI 업데이트)
 **특수 동작**:
 - **Abort 중**: Deploying 중 Abort 버튼 클릭 시, 중단 요청 처리 중에는 버튼이 비활성화되고 "..." 표시
 - **배포 시작**: Ready 또는 Allocated 상태에서만 배포 가능
-- **OS 버전 표시**: Deployed 상태의 Ubuntu 머신에서 STATUS 메시지에 OS 버전이 표시됨
-  - 예: "Ubuntu 24.04 LTS" (distro_series: noble)
-  - distro_series 매핑: xenial → 16.04 LTS, bionic → 18.04 LTS, focal → 20.04 LTS, jammy → 22.04 LTS, noble → 24.04 LTS
+- **OS 선택**: Deploy 버튼 클릭 시 OS 선택 드롭다운 메뉴 표시
+  - Deployable OS 목록은 최초 1회만 로드
+  - 각 OS별 최신 release가 기본값으로 자동 선택됨
+  - OS 목록은 OS 이름별로 그룹화되고, release는 최신순으로 정렬
+- **OS 버전 표시**: Deploying 상태일 때 STATUS 컬럼에 배포 중인 OS 버전 표시
+  - 형식: "OS 버전" (예: "Ubuntu 24.04")
+  - 버전은 숫자만 표시 (LTS 등 제외)
+  - `deployingOS`와 `deployingRelease` 정보 사용
+  - Ubuntu release 매핑: xenial → 16.04, bionic → 18.04, focal → 20.04, jammy → 22.04, noble → 24.04
 
 #### Release 버튼 동작
 
@@ -1032,6 +1089,13 @@ New (다시 시작)
   - `getDeployButtonClass()`: Deploy 버튼 색상 결정
   - `getDeployButtonDisabled()`: Deploy 버튼 활성화 여부 결정
   - `handleDeployButtonClick()`: Deploy 버튼 클릭 처리
+  - `toggleDeployMenu()`: Deploy OS 선택 드롭다운 메뉴 토글
+  - `loadDeployableOS()`: Deployable OS 목록 로드
+  - `selectDeployOS()`: OS 선택 및 배포 시작
+  - `deployMachine()`: 머신 배포 (OS 파라미터 포함)
+  - `formatOSName()`: OS 이름 포맷팅
+  - `getOSSortKey()`: OS 정렬 키 계산
+  - `getDeployingOSVersion()`: Deploying 상태일 때 OS 버전 표시
   - `isFailedDeployment()`: Failed Deployment 상태 확인
   - `togglePowerMenu()`: Power 드롭다운 메뉴 토글
   - `handlePowerAction()`: Power 액션 처리 (Turn on/Turn off)
@@ -1111,6 +1175,7 @@ public class MaasController {
     - DELETE /api/machines/{systemId}
     - GET /api/machines/{systemId}/block-devices
     - GET /api/fabrics
+    - GET /api/deployable-os
     - GET /api/fabrics/{fabricId}/vlans
     - GET /api/subnets
     - PUT /api/machines/{systemId}/interfaces/{interfaceId}/vlan
@@ -1140,7 +1205,10 @@ public class MaasController {
   - `addMachine()`: 머신 추가
   - `commissionMachine()`: 커미셔닝
   - `abortCommissioning()`: 커미셔닝 중단
-  - `deployMachine()`: 배포
+  - `deployMachine()`: 배포 (OS, release, arch 파라미터 포함, distro_series 형식으로 변환)
+  - `getBootSources()`: Boot sources 목록 조회
+  - `getBootSourceSelections()`: Boot source selections 조회
+  - `getAllDeployableOS()`: 모든 Deployable OS 목록 조회
   - `releaseMachine()`: 릴리스
   - `getAllFabrics()`: Fabric 목록 조회
   - `getFabricVlans()`: VLAN 목록 조회
@@ -1365,6 +1433,20 @@ public class MaasController {
 - **요청 파라미터**:
   - `maasUrl` (필수): MAAS 서버 URL
   - `apiKey` (필수): API 키
+  - `os` (선택): OS 이름 (예: `ubuntu`)
+  - `release` (선택): OS release (예: `noble`, `jammy`)
+  - `arch` (선택): Architecture (예: `amd64`)
+- **백엔드 처리**:
+  - 프론트엔드에서 받은 `os`와 `release`를 조합하여 `distro_series` 생성
+  - 형식: `os/release` (예: `ubuntu/noble`, `ubuntu/jammy`)
+  - Form Data 생성 (`MultiValueMap<String, String>`)
+  - `distro_series`와 `architecture`를 Form Data에 추가
+  - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+- **MAAS API**: `POST /MAAS/api/2.0/machines/{systemId}/op-deploy`
+  - 요청 형식: **Form Data** (`application/x-www-form-urlencoded`)
+  - Form Data 필드:
+    - `distro_series` (선택): OS/release 형식 (예: `ubuntu/noble`)
+    - `architecture` (선택): Architecture (예: `amd64`)
 - **응답**:
 ```json
 {
@@ -1372,6 +1454,40 @@ public class MaasController {
   "data": { /* 배포 결과 */ }
 }
 ```
+
+##### GET /api/deployable-os
+- **설명**: Deploy 가능한 OS 목록 조회
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **백엔드 처리**:
+  - MAAS API `GET /MAAS/api/2.0/boot-sources/` 호출하여 boot source ID 목록 조회
+  - 각 boot source에 대해 `GET /MAAS/api/2.0/boot-sources/{id}/selections/` 호출하여 OS 목록 조회
+  - 중복 제거하여 고유한 OS 목록 반환
+- **응답**:
+```json
+{
+  "results": [
+    {
+      "os": "ubuntu",
+      "release": "noble",
+      "arches": ["amd64"]
+    },
+    {
+      "os": "ubuntu",
+      "release": "jammy",
+      "arches": ["amd64"]
+    }
+  ],
+  "count": 2
+}
+```
+- **응답 필드**:
+  - `results`: Deploy 가능한 OS 목록 (배열)
+    - `os`: OS 이름 (예: `ubuntu`)
+    - `release`: OS release (예: `noble`, `jammy`)
+    - `arches`: 지원하는 architecture 목록 (예: `["amd64"]`)
+  - `count`: OS 목록 개수
 
 ##### DELETE /api/machines/{systemId}
 - **설명**: 머신 삭제
@@ -1387,6 +1503,71 @@ public class MaasController {
 }
 ```
 - **MAAS API**: `DELETE /MAAS/api/2.0/machines/{systemId}/`
+
+##### GET /api/machines/{systemId}/power-parameters
+- **설명**: IPMI Power 파라미터 조회
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+```json
+{
+  "power_driver": "LAN_2_0",
+  "power_boot_type": "auto",
+  "power_address": "192.168.1.100",
+  "power_user": "admin",
+  "power_pass": "password",
+  "k_g": "",
+  "cipher_suite_id": 3,
+  "privilege_level": "OPERATOR",
+  "workaround_flags": ["opensesspriv"],
+  "mac_address": "08:00:27:11:34:26"
+}
+```
+- **MAAS API**: `GET /MAAS/api/2.0/machines/{systemId}/op-power_parameters`
+- **참고**: power_type이 "ipmi"인 경우에만 호출
+
+##### PUT /api/machines/{systemId}/power-parameters
+- **설명**: Power 파라미터 업데이트
+- **요청 형식**: **Form Data** (`application/x-www-form-urlencoded`)
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+  - `powerType` (필수): 전원 타입 (manual, ipmi)
+  - **IPMI 파라미터** (powerType이 "ipmi"일 때만):
+    - `powerDriver` (선택): Power Driver
+    - `powerBootType` (선택): Power Boot Type
+    - `powerIpAddress` (선택): IP Address
+    - `powerUser` (선택): Power User
+    - `powerPassword` (선택): Power Password (비워두면 기존 값 유지)
+    - `powerKgBmcKey` (선택): K_g BMC key
+    - `cipherSuiteId` (선택): Cipher Suite ID
+    - `privilegeLevel` (선택): Privilege Level
+    - `workaroundFlags` (선택): Workaround Flags (쉼표로 구분된 문자열)
+    - `powerMac` (선택): Power MAC
+- **백엔드 처리**:
+  - 프론트엔드에서 받은 파라미터를 `MultiValueMap<String, String>`으로 변환
+  - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
+  - IPMI 파라미터는 `power_parameters_` 접두사를 붙여서 전송:
+    - `powerDriver` → `power_parameters_power_driver`
+    - `powerBootType` → `power_parameters_power_boot_type`
+    - `powerIpAddress` → `power_parameters_power_address`
+    - `powerUser` → `power_parameters_power_user`
+    - `powerPassword` → `power_parameters_power_pass`
+    - `powerKgBmcKey` → `power_parameters_k_g`
+    - `cipherSuiteId` → `power_parameters_cipher_suite_id`
+    - `privilegeLevel` → `power_parameters_privilege_level`
+    - `workaroundFlags` → `power_parameters_workaround_flags`
+    - `powerMac` → `power_parameters_mac_address`
+  - 빈 값 필드는 form data에 포함하지 않음
+- **응답**:
+```json
+{
+  "success": true,
+  "data": { /* 업데이트된 머신 정보 */ }
+}
+```
+- **MAAS API**: `PUT /MAAS/api/2.0/machines/{systemId}/`
 
 ##### GET /api/test-connection
 - **설명**: MAAS 서버 연결 테스트
@@ -1625,10 +1806,12 @@ public class MaasController {
   - `totalMachines`: 전체 머신 수
   - `commissionedMachines`: 커미셔닝된 머신 수
   - `deployedMachines`: 배포된 머신 수
+  - `deployableOSCount`: Deploy 가능한 OS 수
   - `loading`: 로딩 상태
   - `error`: 에러 메시지
 - **메서드**:
   - `loadMachineStats()`: 통계 데이터 로드
+  - `loadDeployableOSCount()`: Deploy 가능한 OS 수 로드
 
 ##### MachinesTab.vue
 - **역할**: 머신 관리 화면
@@ -1644,6 +1827,11 @@ public class MaasController {
   - `hoveredPowerMachine`: Power 컬럼 호버 상태
   - `openPowerMenu`: 열린 Power 메뉴 ID
   - `powerMenuPosition`: Power 메뉴 위치
+  - `hoveredDeployMachine`: Deploy 버튼 호버 상태
+  - `openDeployMenu`: 열린 Deploy OS 선택 메뉴 ID
+  - `deployMenuPosition`: Deploy OS 선택 메뉴 위치
+  - `deployableOSList`: Deployable OS 목록
+  - `loadingDeployableOS`: Deployable OS 로딩 상태
 - **메서드**:
   - `loadMachines()`: 머신 목록 로드
   - `showAddMachineModal()`: 머신 추가 모달 표시
@@ -1653,7 +1841,11 @@ public class MaasController {
   - `abortCommissioning()`: 커미셔닝 중단
   - `showNetworkModal()`: 네트워크 모달 표시
   - `handleDeployButtonClick()`: 배포 버튼 클릭 처리
-  - `deployMachine()`: 머신 배포
+  - `toggleDeployMenu()`: Deploy OS 선택 드롭다운 메뉴 토글
+  - `loadDeployableOS()`: Deployable OS 목록 로드
+  - `selectDeployOS()`: OS 선택 및 배포 시작
+  - `deployMachine()`: 머신 배포 (OS 파라미터 포함)
+  - `getDeployingOSVersion()`: Deploying 상태일 때 OS 버전 표시
   - `releaseMachine()`: 머신 릴리스
   - `togglePowerMenu()`: Power 드롭다운 메뉴 토글
   - `handlePowerAction()`: Power 액션 처리 (Turn on/Turn off)
@@ -1746,11 +1938,12 @@ maas.default.api-key=consumer_key:token:token_secret
 ### 5.1 페이지별 역할 및 컴포넌트 구성
 
 #### Dashboard Tab
-- **레이아웃**: 카드 그리드 (3열)
+- **레이아웃**: 카드 그리드 (첫 번째 줄: 3열, 두 번째 줄: 1열)
 - **컴포넌트**:
-  - Stat Card (전체 머신 수)
-  - Stat Card (커미셔닝된 머신 수)
-  - Stat Card (배포된 머신 수)
+  - Stat Card (전체 머신 수) - 첫 번째 줄
+  - Stat Card (커미셔닝된 머신 수) - 첫 번째 줄
+  - Stat Card (배포된 머신 수) - 첫 번째 줄
+  - Stat Card (Deploy 가능한 OS 수) - 두 번째 줄
 - **스타일**: 그라데이션 배경, 호버 효과
 
 #### Machines Tab
@@ -2053,11 +2246,18 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
   - Power 상태 실시간 업데이트 (WebSocket 연동)
 
 #### 4. 배포 중단 (Abort Deploy) 기능
-- **현재 상태**: UI에 버튼은 있으나 백엔드 API 미구현
-- **필요 작업**:
-  - `MaasController`에 `abortDeploy` 엔드포인트 추가
-  - `MaasApiService`에 `abortDeploy` 메서드 추가
-  - MAAS API `/MAAS/api/2.0/machines/{systemId}/op-abort` 호출 (배포 중단용)
+- **현재 상태**: ✅ 구현 완료
+- **구현 내용**:
+  - `MaasController.abortOperation()`: `/api/machines/{systemId}/abort` 엔드포인트 (Commissioning과 Deploying 모두 처리)
+  - `MaasApiService.abortCommissioning()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-abort` 호출
+  - 타임아웃: 60초
+  - **에러 처리**:
+    - 503 Service Unavailable 또는 타임아웃 에러 발생 시:
+      - "Abort operation may have timed out, but the operation might still be in progress. Refreshing machine status..." 메시지 표시
+      - 2초 후 자동으로 머신 상태 재확인 (`loadMachines()` 호출)
+  - **특수 동작**:
+    - Failed Deployment 상태에서 Abort 시도 시: 자동으로 Release 작업으로 전환
+    - Deploying 상태에서 Abort 시도 시: 정상적으로 Abort 처리
 
 #### 5. 다중 머신 선택 액션
 - **현재 상태**: 상태별 머신 선택 기능 및 일괄 액션 바 구현 완료, Delete 기능 완료

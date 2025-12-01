@@ -143,20 +143,38 @@ public class MaasApiService {
         String authHeader = authService.generateAuthHeader(apiKey);
         String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-abort";
         
+        System.out.println("Abort - URL: " + url);
+        System.out.println("Abort - systemId: " + systemId);
+        
         return webClient.post()
                 .uri(url)
                 .header("Authorization", authHeader)
                 .header("Accept", "application/json")
                 .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Abort API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
                 .bodyToMono(String.class)
-                .timeout(Duration.ofSeconds(30))
+                .timeout(Duration.ofSeconds(60)) // 타임아웃을 60초로 증가
                 .map(responseBody -> {
                     try {
+                        System.out.println("Abort API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
                         ObjectMapper mapper = new ObjectMapper();
                         Map<String, Object> result = mapper.readValue(responseBody, Map.class);
                         result.put("success", true);
                         return result;
                     } catch (Exception e) {
+                        System.out.println("Abort JSON parsing error: " + e.getMessage());
                         Map<String, Object> errorResult = new HashMap<>();
                         errorResult.put("success", false);
                         errorResult.put("error", "Failed to parse response: " + e.getMessage());
@@ -164,9 +182,18 @@ public class MaasApiService {
                     }
                 })
                 .onErrorResume(e -> {
+                    System.out.println("Abort API Error: " + e.getMessage());
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("success", false);
-                    errorResult.put("error", "Failed to abort commissioning: " + e.getMessage());
+                    String errorMessage = e.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + e.getClass().getSimpleName();
+                    }
+                    // 타임아웃 에러인 경우 더 명확한 메시지
+                    if (errorMessage.contains("timeout") || errorMessage.contains("30000") || errorMessage.contains("60000")) {
+                        errorMessage = "Abort operation timed out. The operation may still be in progress.";
+                    }
+                    errorResult.put("error", "Failed to abort: " + errorMessage);
                     return Mono.just(errorResult);
                 });
     }
@@ -245,19 +272,41 @@ public class MaasApiService {
      * @param maasUrl MAAS 서버 URL
      * @param apiKey MAAS API 키
      * @param systemId 머신의 시스템 ID
+     * @param os OS 이름 (선택)
+     * @param release OS release (선택)
+     * @param arch Architecture (선택)
      * @return 배포 결과
      */
-    public Mono<Map<String, Object>> deployMachine(String maasUrl, String apiKey, String systemId) {
+    public Mono<Map<String, Object>> deployMachine(String maasUrl, String apiKey, String systemId, 
+            String os, String release, String arch) {
         String authHeader = authService.generateAuthHeader(apiKey);
         String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-deploy";
         
         System.out.println("Deploy Machine - URL: " + url);
         System.out.println("Deploy Machine - systemId: " + systemId);
+        if (os != null) {
+            System.out.println("Deploy Machine - OS: " + os + ", Release: " + release + ", Arch: " + arch);
+        }
+        
+        // Form data 생성
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        
+        // distro_series 형식: ubuntu/noble, ubuntu/jammy 등
+        if (os != null && !os.trim().isEmpty() && release != null && !release.trim().isEmpty()) {
+            String distroSeries = os.trim() + "/" + release.trim();
+            formData.add("distro_series", distroSeries);
+            System.out.println("Deploy Machine - distro_series: " + distroSeries);
+        }
+        
+        if (arch != null && !arch.trim().isEmpty()) {
+            formData.add("architecture", arch.trim());
+        }
         
         return webClient.post()
                 .uri(url)
                 .header("Authorization", authHeader)
                 .header("Accept", "application/json")
+                .body(formData.isEmpty() ? BodyInserters.empty() : BodyInserters.fromFormData(formData))
                 .retrieve()
                 .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
                     return response.bodyToMono(String.class)
@@ -1459,5 +1508,189 @@ public class MaasApiService {
         }
         
         return formData;
+    }
+    
+    /**
+     * MAAS 서버에서 boot sources 목록을 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @return boot sources 목록
+     */
+    public Mono<List<Map<String, Object>>> getBootSources(String maasUrl, String apiKey) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/boot-sources/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        List<Map<String, Object>> bootSources = new ArrayList<>();
+                        
+                        if (jsonNode.isArray()) {
+                            for (JsonNode source : jsonNode) {
+                                Map<String, Object> sourceMap = new HashMap<>();
+                                if (source.has("id")) {
+                                    sourceMap.put("id", source.get("id").asInt());
+                                }
+                                if (source.has("url")) {
+                                    sourceMap.put("url", source.get("url").asText());
+                                }
+                                if (source.has("keyring_filename")) {
+                                    sourceMap.put("keyring_filename", source.get("keyring_filename").asText());
+                                }
+                                if (source.has("keyring_data")) {
+                                    sourceMap.put("keyring_data", source.get("keyring_data").asText());
+                                }
+                                bootSources.add(sourceMap);
+                            }
+                        }
+                        
+                        return bootSources;
+                    } catch (Exception e) {
+                        System.err.println("Error parsing boot sources: " + e.getMessage());
+                        e.printStackTrace();
+                        return new ArrayList<Map<String, Object>>();
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.err.println("Error fetching boot sources: " + throwable.getMessage());
+                    throwable.printStackTrace();
+                    return Mono.just(new ArrayList<Map<String, Object>>());
+                });
+    }
+    
+    /**
+     * 특정 boot source의 selections 목록을 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param bootSourceId boot source ID
+     * @return selections 목록
+     */
+    public Mono<List<Map<String, Object>>> getBootSourceSelections(String maasUrl, String apiKey, int bootSourceId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/boot-sources/" + bootSourceId + "/selections/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        List<Map<String, Object>> selections = new ArrayList<>();
+                        
+                        if (jsonNode.isArray()) {
+                            for (JsonNode selection : jsonNode) {
+                                Map<String, Object> selectionMap = new HashMap<>();
+                                if (selection.has("os")) {
+                                    selectionMap.put("os", selection.get("os").asText());
+                                }
+                                if (selection.has("release")) {
+                                    selectionMap.put("release", selection.get("release").asText());
+                                }
+                                if (selection.has("arches")) {
+                                    List<String> arches = new ArrayList<>();
+                                    JsonNode archesNode = selection.get("arches");
+                                    if (archesNode.isArray()) {
+                                        for (JsonNode arch : archesNode) {
+                                            arches.add(arch.asText());
+                                        }
+                                    }
+                                    selectionMap.put("arches", arches);
+                                }
+                                if (selection.has("subarches")) {
+                                    List<String> subarches = new ArrayList<>();
+                                    JsonNode subarchesNode = selection.get("subarches");
+                                    if (subarchesNode.isArray()) {
+                                        for (JsonNode subarch : subarchesNode) {
+                                            subarches.add(subarch.asText());
+                                        }
+                                    }
+                                    selectionMap.put("subarches", subarches);
+                                }
+                                if (selection.has("labels")) {
+                                    List<String> labels = new ArrayList<>();
+                                    JsonNode labelsNode = selection.get("labels");
+                                    if (labelsNode.isArray()) {
+                                        for (JsonNode label : labelsNode) {
+                                            labels.add(label.asText());
+                                        }
+                                    }
+                                    selectionMap.put("labels", labels);
+                                }
+                                if (selection.has("id")) {
+                                    selectionMap.put("id", selection.get("id").asInt());
+                                }
+                                if (selection.has("boot_source_id")) {
+                                    selectionMap.put("boot_source_id", selection.get("boot_source_id").asInt());
+                                }
+                                selections.add(selectionMap);
+                            }
+                        }
+                        
+                        return selections;
+                    } catch (Exception e) {
+                        System.err.println("Error parsing boot source selections: " + e.getMessage());
+                        e.printStackTrace();
+                        return new ArrayList<Map<String, Object>>();
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    System.err.println("Error fetching boot source selections: " + throwable.getMessage());
+                    throwable.printStackTrace();
+                    return Mono.just(new ArrayList<Map<String, Object>>());
+                });
+    }
+    
+    /**
+     * 모든 deployable OS 목록을 가져옵니다.
+     * 모든 boot sources를 순회하며 각 source의 selections를 수집합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @return deployable OS 목록
+     */
+    public Mono<List<Map<String, Object>>> getAllDeployableOS(String maasUrl, String apiKey) {
+        return getBootSources(maasUrl, apiKey)
+                .flatMap(bootSources -> {
+                    if (bootSources.isEmpty()) {
+                        return Mono.just(new ArrayList<Map<String, Object>>());
+                    }
+                    
+                    // 모든 boot source의 selections를 순차적으로 가져오기
+                    List<Map<String, Object>> allSelections = new ArrayList<>();
+                    Mono<List<Map<String, Object>>> resultMono = Mono.just(allSelections);
+                    
+                    for (Map<String, Object> source : bootSources) {
+                        Integer id = (Integer) source.get("id");
+                        if (id != null) {
+                            resultMono = resultMono.flatMap(selections -> {
+                                return getBootSourceSelections(maasUrl, apiKey, id)
+                                        .map(newSelections -> {
+                                            selections.addAll(newSelections);
+                                            return selections;
+                                        });
+                            });
+                        }
+                    }
+                    
+                    return resultMono;
+                })
+                .onErrorResume(throwable -> {
+                    System.err.println("Error fetching all deployable OS: " + throwable.getMessage());
+                    throwable.printStackTrace();
+                    return Mono.just(new ArrayList<Map<String, Object>>());
+                });
     }
 }

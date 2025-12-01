@@ -31,6 +31,7 @@
 import { ref, computed } from 'vue'
 import DashboardTab from './components/DashboardTab.vue'
 import MachinesTab from './components/MachinesTab.vue'
+import ConfigurationTab from './components/ConfigurationTab.vue'
 import SettingsTab from './components/SettingsTab.vue'
 
 export default {
@@ -38,6 +39,7 @@ export default {
   components: {
     DashboardTab,
     MachinesTab,
+    ConfigurationTab,
     SettingsTab
   },
   setup() {
@@ -45,6 +47,7 @@ export default {
     const tabs = [
       { id: 'dashboard', name: 'Dashboard', component: 'DashboardTab' },
       { id: 'machines', name: 'Machines', component: 'MachinesTab' },
+      { id: 'configuration', name: 'Configuration', component: 'ConfigurationTab' },
       { id: 'settings', name: 'Settings', component: 'SettingsTab' }
     ]
     
