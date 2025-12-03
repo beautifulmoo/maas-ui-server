@@ -613,15 +613,25 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **출력**: 전원 상태 변경 결과
 - **주요 코드 파일**:
   - `MachinesTab.vue`: Power 컬럼 UI 및 드롭다운 메뉴
+  - `MaasController.powerOnMachine()`, `MaasController.powerOffMachine()`: API 엔드포인트
+  - `MaasApiService.powerOnMachine()`, `MaasApiService.powerOffMachine()`: MAAS API 호출
   - `togglePowerMenu()`: Power 드롭다운 메뉴 토글
-  - `handlePowerAction()`: Power 액션 처리 (현재 미구현)
+  - `handlePowerAction()`: Power 액션 처리
 - **내부 로직 흐름**:
   1. Power 컬럼에 Power State와 Power Type 표시
   2. Power 컬럼에 마우스 호버 시 드롭다운 아이콘(▼) 표시
   3. 드롭다운 아이콘 클릭 시 Power 액션 메뉴 표시
-  4. "Turn on" 또는 "Turn off" 선택
-  5. `handlePowerAction()` 함수 호출
-  6. 백엔드 API 호출 (현재 미구현 - TODO)
+  4. Power 상태에 따라 메뉴 항목 조건부 표시:
+     - Power가 `off` 상태이면 "Turn on"만 표시
+     - Power가 `on` 상태이면 "Turn off"만 표시
+  5. "Turn on" 또는 "Turn off" 선택
+  6. `handlePowerAction()` 함수 호출
+  7. 백엔드 API 호출 (`POST /api/machines/{systemId}/power-on` 또는 `power-off`)
+  8. MAAS API 호출 (`POST /MAAS/api/2.0/machines/{systemId}/op-power_on` 또는 `op-power_off`)
+  9. 성공 시 2초 후 머신 목록 자동 새로고침 (WebSocket을 통한 실시간 업데이트 대기)
+- **에러 처리**:
+  - API 호출 실패 시 에러 메시지 표시
+  - Power 상태는 WebSocket을 통해 실시간으로 업데이트됨
 - **UI 구성**:
   - **Power 컬럼**: Power State (상단), Power Type (하단) 표시
     - **Power State 표시**:
@@ -1504,6 +1514,56 @@ public class MaasController {
 ```
 - **MAAS API**: `DELETE /MAAS/api/2.0/machines/{systemId}/`
 
+##### POST /api/machines/{systemId}/power-on
+- **설명**: 머신의 전원을 켭니다
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+```json
+{
+  "success": true,
+  "power_state": "on"
+}
+```
+- **에러 응답**:
+```json
+{
+  "success": false,
+  "error": "Failed to power on machine"
+}
+```
+- **MAAS API**: `POST /MAAS/api/2.0/machines/{systemId}/op-power_on`
+- **타임아웃**: 30초
+- **주요 코드 파일**:
+  - `MaasController.powerOnMachine()`: API 엔드포인트
+  - `MaasApiService.powerOnMachine()`: MAAS API 호출
+
+##### POST /api/machines/{systemId}/power-off
+- **설명**: 머신의 전원을 끕니다
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+```json
+{
+  "success": true,
+  "power_state": "off"
+}
+```
+- **에러 응답**:
+```json
+{
+  "success": false,
+  "error": "Failed to power off machine"
+}
+```
+- **MAAS API**: `POST /MAAS/api/2.0/machines/{systemId}/op-power_off`
+- **타임아웃**: 30초
+- **주요 코드 파일**:
+  - `MaasController.powerOffMachine()`: API 엔드포인트
+  - `MaasApiService.powerOffMachine()`: MAAS API 호출
+
 ##### GET /api/machines/{systemId}/power-parameters
 - **설명**: IPMI Power 파라미터 조회
 - **요청 파라미터**:
@@ -2234,16 +2294,30 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
   - Tag 관리, Owner 변경, Zone/Pool 변경 등
 
 #### 3. Power Action 기능 (Turn on/Turn off)
-- **현재 상태**: UI 구현 완료, 백엔드 API 미구현
-- **필요 작업**:
-  - `MaasController`에 Power 제어 엔드포인트 추가
-    - `POST /api/machines/{systemId}/power-on`
-    - `POST /api/machines/{systemId}/power-off`
-  - `MaasApiService`에 Power 제어 메서드 추가
-    - `powerOnMachine()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-power_on` 호출
-    - `powerOffMachine()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-power_off` 호출
-  - 프론트엔드 `handlePowerAction()` 함수에 API 호출 로직 구현
-  - Power 상태 실시간 업데이트 (WebSocket 연동)
+- **현재 상태**: ✅ 구현 완료
+- **구현 내용**:
+  - **백엔드 API 엔드포인트**:
+    - `POST /api/machines/{systemId}/power-on`: 머신 전원 켜기
+    - `POST /api/machines/{systemId}/power-off`: 머신 전원 끄기
+  - **백엔드 서비스 메서드**:
+    - `MaasApiService.powerOnMachine()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-power_on` 호출
+    - `MaasApiService.powerOffMachine()`: MAAS API `/MAAS/api/2.0/machines/{systemId}/op-power_off` 호출
+    - 타임아웃: 30초
+  - **프론트엔드 구현**:
+    - `handlePowerAction()`: 개별 머신 Power on/off API 호출
+    - Power 상태에 따라 메뉴 항목 조건부 표시:
+      - Power가 `off` 상태이면 "Turn on"만 표시
+      - Power가 `on` 상태이면 "Turn off"만 표시
+    - 성공 시 2초 후 머신 목록 자동 새로고침
+  - **일괄 Power 작업**:
+    - 액션 바의 Power 드롭다운 메뉴에서 일괄 Power on/off 지원
+    - 선택된 머신들의 Power 상태에 따라 메뉴 활성화/비활성화:
+      - 모두 `off` 상태 → "Turn on..."만 활성화, "Turn off..." 비활성화
+      - 모두 `on` 상태 → "Turn off..."만 활성화, "Turn on..." 비활성화
+      - 혼재 상태 → 둘 다 비활성화
+    - `handleBulkPowerAction()`: 선택된 모든 머신에 대해 Power on/off API 호출
+    - 결과 요약 표시 (성공/실패 개수)
+  - **Power 상태 실시간 업데이트**: WebSocket을 통해 자동 업데이트
 
 #### 4. 배포 중단 (Abort Deploy) 기능
 - **현재 상태**: ✅ 구현 완료
@@ -2260,17 +2334,33 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
     - Deploying 상태에서 Abort 시도 시: 정상적으로 Abort 처리
 
 #### 5. 다중 머신 선택 액션
-- **현재 상태**: 상태별 머신 선택 기능 및 일괄 액션 바 구현 완료, Delete 기능 완료
+- **현재 상태**: 상태별 머신 선택 기능 및 일괄 액션 바 구현 완료, Delete 기능 완료, Power 기능 완료
 - **구현 완료**:
   - ✅ 상태별 머신 일괄 선택/해제 기능
   - ✅ 전체 선택 체크박스와 상태별 선택 드롭다운 통합
   - ✅ 일괄 액션 바 (머신 선택 시 상단 표시)
   - ✅ 일괄 Delete 기능 (백엔드 API 연결 및 테스트 완료)
   - ✅ Actions 드롭다운 메뉴 (Commission, Allocate, Deploy, Release, Abort)
-  - ✅ Power 드롭다운 메뉴 (UI만 구현, 기능 예정)
+  - ✅ Power 드롭다운 메뉴 (개별 및 일괄 Power On/Off 기능 구현 완료)
+- **일괄 Power 작업 기능 상세**:
+  - **메뉴 활성화/비활성화 로직**:
+    - `canBulkPowerOn()`: 선택된 모든 머신이 `off` 상태일 때만 `true`
+    - `canBulkPowerOff()`: 선택된 모든 머신이 `on` 상태일 때만 `true`
+    - 혼재 상태 (일부는 `on`, 일부는 `off`): 둘 다 비활성화
+  - **작업 흐름**:
+    1. 여러 머신 선택
+    2. 액션 바의 "Power" 드롭다운 메뉴 클릭
+    3. Power 상태에 따라 활성화된 메뉴 항목 선택 ("Turn on..." 또는 "Turn off...")
+    4. 확인 메시지 표시 (`선택된 N개의 머신의 전원을 켜기/끄기 하시겠습니까?`)
+    5. 확인 시 각 머신에 대해 순차적으로 Power on/off API 호출
+    6. 결과 수집 및 요약 표시 (성공/실패 개수)
+    7. 2초 후 머신 목록 자동 새로고침
+  - **에러 처리**:
+    - 각 머신별로 개별 에러 처리
+    - 실패한 머신의 에러 메시지 수집
+    - 전체 결과 요약 표시 (예: "Power on: 3개 성공, 1개 실패")
 - **필요 작업**:
   - 일괄 Commission, Deploy, Release, Abort 기능 백엔드 API 연결
-  - 일괄 Power On/Off 기능 구현
 
 #### 6. 에러 처리 개선
 - **현재 상태**: 기본적인 에러 처리만 구현

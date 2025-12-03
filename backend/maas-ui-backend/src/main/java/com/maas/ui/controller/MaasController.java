@@ -281,6 +281,58 @@ public class MaasController {
     }
     
     /**
+     * 머신의 전원을 켭니다.
+     */
+    @PostMapping("/machines/{systemId}/power-on")
+    public Mono<ResponseEntity<Map<String, Object>>> powerOnMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.powerOnMachine(maasUrl, apiKey, systemId)
+                .map(result -> {
+                    if (Boolean.TRUE.equals(result.get("success"))) {
+                        return ResponseEntity.ok(result);
+                    } else {
+                        return ResponseEntity.status(500).body(result);
+                    }
+                })
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to power on machine")));
+    }
+    
+    /**
+     * 머신의 전원을 끕니다.
+     */
+    @PostMapping("/machines/{systemId}/power-off")
+    public Mono<ResponseEntity<Map<String, Object>>> powerOffMachine(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.powerOffMachine(maasUrl, apiKey, systemId)
+                .map(result -> {
+                    if (Boolean.TRUE.equals(result.get("success"))) {
+                        return ResponseEntity.ok(result);
+                    } else {
+                        return ResponseEntity.status(500).body(result);
+                    }
+                })
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to power off machine")));
+    }
+    
+    /**
      * 머신을 배포합니다.
      */
     @PostMapping("/machines/{systemId}/release")

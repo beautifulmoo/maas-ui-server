@@ -199,6 +199,132 @@ public class MaasApiService {
     }
     
     /**
+     * MAAS 서버에서 머신의 전원을 켭니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return Power on 결과
+     */
+    public Mono<Map<String, Object>> powerOnMachine(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-power_on";
+        
+        System.out.println("Power On - URL: " + url);
+        System.out.println("Power On - systemId: " + systemId);
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Power On API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Power On API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> result = mapper.readValue(responseBody, Map.class);
+                        result.put("success", true);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Power On JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "Failed to parse response: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.out.println("Power On API Error: " + e.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    String errorMessage = e.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + e.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", "Failed to power on: " + errorMessage);
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
+     * MAAS 서버에서 머신의 전원을 끕니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param systemId 머신의 시스템 ID
+     * @return Power off 결과
+     */
+    public Mono<Map<String, Object>> powerOffMachine(String maasUrl, String apiKey, String systemId) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-power_off";
+        
+        System.out.println("Power Off - URL: " + url);
+        System.out.println("Power Off - systemId: " + systemId);
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Power Off API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        System.out.println("Power Off API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> result = mapper.readValue(responseBody, Map.class);
+                        result.put("success", true);
+                        return result;
+                    } catch (Exception e) {
+                        System.out.println("Power Off JSON parsing error: " + e.getMessage());
+                        Map<String, Object> errorResult = new HashMap<>();
+                        errorResult.put("success", false);
+                        errorResult.put("error", "Failed to parse response: " + e.getMessage());
+                        return errorResult;
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.out.println("Power Off API Error: " + e.getMessage());
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("success", false);
+                    String errorMessage = e.getMessage();
+                    if (errorMessage == null || errorMessage.isEmpty()) {
+                        errorMessage = "API call failed: " + e.getClass().getSimpleName();
+                    }
+                    errorResult.put("error", "Failed to power off: " + errorMessage);
+                    return Mono.just(errorResult);
+                });
+    }
+    
+    /**
      * MAAS 서버에서 머신을 릴리스합니다.
      * 
      * @param maasUrl MAAS 서버 URL

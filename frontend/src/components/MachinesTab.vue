@@ -87,11 +87,19 @@
             }"
             @click.stop
           >
-            <div class="action-bar-dropdown-item disabled">
-              Turn on... (Coming soon)
+            <div 
+              class="action-bar-dropdown-item"
+              :class="{ 'disabled': !canBulkPowerOn() }"
+              @click="handleBulkPowerAction('on')"
+            >
+              Turn on...
             </div>
-            <div class="action-bar-dropdown-item disabled">
-              Turn off... (Coming soon)
+            <div 
+              class="action-bar-dropdown-item"
+              :class="{ 'disabled': !canBulkPowerOff() }"
+              @click="handleBulkPowerAction('off')"
+            >
+              Turn off...
             </div>
           </div>
         </Teleport>
@@ -446,6 +454,7 @@
       >
         <div class="power-dropdown-header">TAKE ACTION:</div>
         <div 
+          v-if="getMachineById(openPowerMenu) && getMachineById(openPowerMenu).power_state !== 'on'"
           class="power-dropdown-item"
           @click="handlePowerAction(getMachineById(openPowerMenu), 'on')"
         >
@@ -453,6 +462,7 @@
           <span>Turn on</span>
         </div>
         <div 
+          v-if="getMachineById(openPowerMenu) && getMachineById(openPowerMenu).power_state === 'on'"
           class="power-dropdown-item"
           @click="handlePowerAction(getMachineById(openPowerMenu), 'off')"
         >
@@ -2192,22 +2202,48 @@ export default {
       return machines.value.find(m => m.id === machineId) || null
     }
     
-    const handlePowerAction = (machine, action) => {
+    const handlePowerAction = async (machine, action) => {
       if (!machine) {
         console.warn('Machine not found')
         openPowerMenu.value = null
         powerMenuPosition.value = { top: 0, left: 0 }
         return
       }
+      
       console.log(`Power action: ${action} for machine ${machine.id}`)
-      // TODO: API 연결 (나중에 구현)
-      // if (action === 'on') {
-      //   // Turn on API call
-      // } else if (action === 'off') {
-      //   // Turn off API call
-      // }
+      
+      // 메뉴 닫기
       openPowerMenu.value = null
       powerMenuPosition.value = { top: 0, left: 0 }
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const endpoint = action === 'on' 
+          ? `http://localhost:8081/api/machines/${machine.id}/power-on`
+          : `http://localhost:8081/api/machines/${machine.id}/power-off`
+        
+        const response = await axios.post(endpoint, null, {
+          params: {
+            maasUrl: apiParams.maasUrl,
+            apiKey: apiParams.apiKey
+          }
+        })
+        
+        if (response.data && response.data.success) {
+          console.log(`Machine ${action === 'on' ? 'powered on' : 'powered off'} successfully:`, response.data)
+          // Power state will be updated via WebSocket
+          // Optionally refresh machine list after a short delay
+          setTimeout(() => {
+            loadMachines()
+          }, 2000)
+        } else {
+          error.value = response.data?.error || `Failed to power ${action} machine`
+          console.error(`Failed to power ${action}:`, response.data)
+        }
+      } catch (err) {
+        console.error(`Error powering ${action} machine:`, err)
+        error.value = err.response?.data?.error || err.message || `Failed to power ${action} machine`
+      }
     }
     
     // Machine Details Modal
@@ -4536,6 +4572,91 @@ export default {
       return selected.every(m => getAvailableActions(m).includes('abort'))
     }
     
+    // Power 상태 확인 함수들
+    const canBulkPowerOn = () => {
+      const selected = getSelectedMachines()
+      if (selected.length === 0) return false
+      // 모든 선택된 머신이 off 상태여야 Turn on 가능
+      // power_state가 'on'이 아닌 모든 경우를 off로 간주
+      return selected.every(m => m.power_state !== 'on')
+    }
+    
+    const canBulkPowerOff = () => {
+      const selected = getSelectedMachines()
+      if (selected.length === 0) return false
+      // 모든 선택된 머신이 on 상태여야 Turn off 가능
+      return selected.every(m => m.power_state === 'on')
+    }
+    
+    // 일괄 Power 작업 핸들러
+    const handleBulkPowerAction = async (action) => {
+      openPowerActionMenu.value = false
+      const selected = getSelectedMachines()
+      
+      if (selected.length === 0) {
+        return
+      }
+      
+      // 확인 메시지
+      const actionText = action === 'on' ? '켜기' : '끄기'
+      const confirmMessage = `선택된 ${selected.length}개의 머신의 전원을 ${actionText} 하시겠습니까?`
+      
+      const confirmed = await customConfirm(confirmMessage, '일괄 Power 작업 확인')
+      if (!confirmed) {
+        return
+      }
+      
+      // 각 머신에 대해 Power 작업 수행
+      const results = []
+      for (const machine of selected) {
+        try {
+          const apiParams = settingsStore.getApiParams.value
+          const endpoint = action === 'on' 
+            ? `http://localhost:8081/api/machines/${machine.id}/power-on`
+            : `http://localhost:8081/api/machines/${machine.id}/power-off`
+          
+          const response = await axios.post(endpoint, null, {
+            params: {
+              maasUrl: apiParams.maasUrl,
+              apiKey: apiParams.apiKey
+            }
+          })
+          
+          if (response.data && response.data.success) {
+            results.push({ machine: machine.id, success: true })
+          } else {
+            results.push({ 
+              machine: machine.id, 
+              success: false, 
+              error: response.data?.error || `Failed to power ${action}` 
+            })
+          }
+        } catch (err) {
+          console.error(`Failed to power ${action} machine ${machine.id}:`, err)
+          results.push({ 
+            machine: machine.id, 
+            success: false, 
+            error: err.response?.data?.error || err.message || `Failed to power ${action}` 
+          })
+        }
+      }
+      
+      // 결과 요약
+      const successCount = results.filter(r => r.success).length
+      const failCount = results.length - successCount
+      
+      if (failCount > 0) {
+        error.value = `Power ${action}: ${successCount}개 성공, ${failCount}개 실패`
+      } else {
+        console.log(`All ${selected.length} machines powered ${action} successfully`)
+      }
+      
+      // 2초 후 머신 목록 새로고침
+      setTimeout(() => {
+        loadMachines()
+      }, 2000)
+    }
+    
     // 일괄 작업 핸들러
     const handleBulkAction = async (action) => {
       openActionsMenu.value = false
@@ -6552,6 +6673,9 @@ export default {
         toggleActionsMenu,
         togglePowerActionMenu,
         handleBulkAction,
+        canBulkPowerOn,
+        canBulkPowerOff,
+        handleBulkPowerAction,
         handleBulkDelete,
         canBulkCommission,
         canBulkAllocate,
