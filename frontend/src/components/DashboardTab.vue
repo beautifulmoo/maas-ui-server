@@ -5,7 +5,7 @@
       <div class="stat-card">
         <div class="stat-icon">🖥️</div>
         <div class="stat-content">
-          <h3>{{ totalMachines }}</h3>
+          <h3>{{ totalMachines !== null ? totalMachines : '-' }}</h3>
           <p>Total Machines</p>
         </div>
       </div>
@@ -13,7 +13,7 @@
       <div class="stat-card">
         <div class="stat-icon">✅</div>
         <div class="stat-content">
-          <h3>{{ commissionedMachines }}</h3>
+          <h3>{{ commissionedMachines !== null ? commissionedMachines : '-' }}</h3>
           <p>Commissioned Machines</p>
         </div>
       </div>
@@ -21,7 +21,7 @@
       <div class="stat-card">
         <div class="stat-icon">🚀</div>
         <div class="stat-content">
-          <h3>{{ deployedMachines }}</h3>
+          <h3>{{ deployedMachines !== null ? deployedMachines : '-' }}</h3>
           <p>Deployed Machines</p>
         </div>
       </div>
@@ -31,7 +31,7 @@
       <div class="stat-card">
         <div class="stat-icon">💿</div>
         <div class="stat-content">
-          <h3>{{ deployableOSCount }}</h3>
+          <h3>{{ deployableOSCount !== null ? deployableOSCount : '-' }}</h3>
           <p>Deployable OS</p>
         </div>
       </div>
@@ -55,10 +55,10 @@ import { useSettings } from '../composables/useSettings'
 export default {
   name: 'DashboardTab',
   setup() {
-    const totalMachines = ref(0)
-    const commissionedMachines = ref(0)
-    const deployedMachines = ref(0)
-    const deployableOSCount = ref(0)
+    const totalMachines = ref(null)
+    const commissionedMachines = ref(null)
+    const deployedMachines = ref(null)
+    const deployableOSCount = ref(null)
     const loading = ref(true)
     const error = ref(null)
     
@@ -80,10 +80,10 @@ export default {
           commissionedMachines.value = response.data.commissionedMachines || 0
           deployedMachines.value = response.data.deployedMachines || 0
         } else {
-          // API 응답이 없는 경우 목업 데이터 사용
-          totalMachines.value = 12
-          commissionedMachines.value = 8
-          deployedMachines.value = 5
+          // API 응답이 없는 경우 null로 설정하여 "-" 표시
+          totalMachines.value = null
+          commissionedMachines.value = null
+          deployedMachines.value = null
         }
         
         loading.value = false
@@ -93,10 +93,10 @@ export default {
         error.value = err.response?.data?.error || err.message || 'Failed to load machine statistics'
         loading.value = false
         
-        // 에러 발생 시 목업 데이터 사용
-        totalMachines.value = 12
-        commissionedMachines.value = 8
-        deployedMachines.value = 5
+        // 에러 발생 시 null로 설정하여 "-" 표시
+        totalMachines.value = null
+        commissionedMachines.value = null
+        deployedMachines.value = null
       }
     }
     
@@ -111,11 +111,11 @@ export default {
         } else if (response.data && typeof response.data.count === 'number') {
           deployableOSCount.value = response.data.count
         } else {
-          deployableOSCount.value = 0
+          deployableOSCount.value = null
         }
       } catch (err) {
         console.error('Error loading deployable OS count:', err)
-        deployableOSCount.value = 0
+        deployableOSCount.value = null
       }
     }
     

@@ -469,6 +469,14 @@
           <span class="power-icon power-off">●</span>
           <span>Turn off</span>
         </div>
+        <div 
+          v-if="getMachineById(openPowerMenu)"
+          class="power-dropdown-item"
+          @click="handleCheckPower(getMachineById(openPowerMenu))"
+        >
+          <span class="power-icon">🔍</span>
+          <span>Check power</span>
+        </div>
       </div>
     </Teleport>
 
@@ -2243,6 +2251,49 @@ export default {
       } catch (err) {
         console.error(`Error powering ${action} machine:`, err)
         error.value = err.response?.data?.error || err.message || `Failed to power ${action} machine`
+      }
+    }
+    
+    // Check power - 전원 상태만 조회하고 업데이트 (다른 액션과 완전히 분리)
+    const handleCheckPower = async (machine) => {
+      if (!machine) {
+        console.warn('Machine not found')
+        openPowerMenu.value = null
+        powerMenuPosition.value = { top: 0, left: 0 }
+        return
+      }
+      
+      console.log(`Check power for machine ${machine.id}`)
+      
+      // 메뉴 닫기
+      openPowerMenu.value = null
+      powerMenuPosition.value = { top: 0, left: 0 }
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        const endpoint = `http://localhost:8081/api/machines/${machine.id}/query-power-state`
+        
+        const response = await axios.get(endpoint, {
+          params: {
+            maasUrl: apiParams.maasUrl,
+            apiKey: apiParams.apiKey
+          }
+        })
+        
+        if (response.data && response.data.success && response.data.state) {
+          console.log(`Power state queried successfully:`, response.data)
+          // Update machine's power_state with the queried state only
+          const machineIndex = machines.value.findIndex(m => m.id === machine.id)
+          if (machineIndex !== -1) {
+            machines.value[machineIndex].power_state = response.data.state
+          }
+        } else {
+          error.value = response.data?.error || 'Failed to query power state'
+          console.error('Failed to query power state:', response.data)
+        }
+      } catch (err) {
+        console.error('Error querying power state:', err)
+        error.value = err.response?.data?.error || err.message || 'Failed to query power state'
       }
     }
     
@@ -6653,6 +6704,7 @@ export default {
         powerMenuPosition,
         togglePowerMenu,
         handlePowerAction,
+        handleCheckPower,
         getMachineById,
         // Deploy Menu
         hoveredDeployMachine,

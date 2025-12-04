@@ -333,6 +333,32 @@ public class MaasController {
     }
     
     /**
+     * 머신의 전원 상태를 조회합니다.
+     */
+    @GetMapping("/machines/{systemId}/query-power-state")
+    public Mono<ResponseEntity<Map<String, Object>>> queryPowerState(
+            @PathVariable String systemId,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.queryPowerState(maasUrl, apiKey, systemId)
+                .map(result -> {
+                    if (Boolean.TRUE.equals(result.get("success"))) {
+                        return ResponseEntity.ok(result);
+                    } else {
+                        return ResponseEntity.status(500).body(result);
+                    }
+                })
+                .onErrorReturn(ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to query power state")));
+    }
+    
+    /**
      * 머신을 배포합니다.
      */
     @PostMapping("/machines/{systemId}/release")
