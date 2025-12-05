@@ -1882,4 +1882,63 @@ public class MaasApiService {
                     return Mono.just(new ArrayList<Map<String, Object>>());
                 });
     }
+    
+    /**
+     * MAAS 서버에서 모든 태그 목록을 가져옵니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @return 태그 목록
+     */
+    public Mono<List<Map<String, Object>>> getAllTags(String maasUrl, String apiKey) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/tags/";
+        
+        return webClient.get()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        List<Map<String, Object>> tags = new ArrayList<>();
+                        
+                        if (jsonNode.isArray()) {
+                            for (JsonNode tag : jsonNode) {
+                                Map<String, Object> tagMap = new HashMap<>();
+                                if (tag.has("name")) {
+                                    tagMap.put("name", tag.get("name").asText());
+                                }
+                                if (tag.has("definition")) {
+                                    tagMap.put("definition", tag.get("definition").asText());
+                                }
+                                if (tag.has("comment")) {
+                                    tagMap.put("comment", tag.get("comment").asText());
+                                }
+                                if (tag.has("kernel_opts")) {
+                                    tagMap.put("kernel_opts", tag.get("kernel_opts").asText());
+                                }
+                                if (tag.has("resource_uri")) {
+                                    tagMap.put("resource_uri", tag.get("resource_uri").asText());
+                                }
+                                tags.add(tagMap);
+                            }
+                        }
+                        
+                        return tags;
+                    } catch (Exception e) {
+                        System.err.println("Error parsing tags: " + e.getMessage());
+                        e.printStackTrace();
+                        return new ArrayList<Map<String, Object>>();
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error fetching tags: " + e.getMessage());
+                    e.printStackTrace();
+                    return Mono.just(new ArrayList<Map<String, Object>>());
+                });
+    }
 }

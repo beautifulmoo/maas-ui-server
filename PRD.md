@@ -212,7 +212,86 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 데이터를 불러오지 못한 경우 통계 값에 "-" 표시
   - 네트워크 통신 실패 또는 API 호출 실패 시 모든 통계 항목에 "-" 표시
 
-### 3.2 Machines Tab 기능
+### 3.2 Configuration Tab 기능
+
+#### 기능명: Deployable OS 이미지 목록 조회
+- **설명**: MAAS에서 설치 가능한 OS 이미지 목록을 조회하여 표시
+- **입력**: 없음 (자동 로드)
+- **출력**: OS 이미지 목록 테이블
+  - OS, Release, Version, Architecture 컬럼
+- **주요 코드 파일**:
+  - `ConfigurationTab.vue`: Images 섹션
+  - `MaasController.getDeployableOS()`: API 엔드포인트
+  - `MaasApiService.getAllDeployableOS()`: MAAS API 호출
+- **내부 로직 흐름**:
+  1. 컴포넌트 마운트 시 자동 로드
+  2. 백엔드 `/api/deployable-os` 엔드포인트 호출
+  3. MAAS API `/MAAS/api/2.0/boot-sources/` 호출하여 boot sources 목록 조회
+  4. 각 boot source의 `/MAAS/api/2.0/boot-sources/{id}/selections/` 호출하여 selections 조회
+  5. 모든 selections를 병합하여 deployable OS 목록 생성
+  6. Ubuntu release 버전 매핑 (xenial → 16.04 LTS 등)
+  7. 테이블 형태로 표시
+- **에러 처리**:
+  - API 호출 실패 시 에러 메시지 표시
+  - Retry 버튼 제공
+
+#### 기능명: MAAS 태그 목록 조회
+- **설명**: MAAS에 등록된 모든 태그 목록을 조회하여 표시
+- **입력**: 없음 (자동 로드)
+- **출력**: 태그 목록 테이블
+  - Name, Definition, Comment, Kernel Options 컬럼
+- **주요 코드 파일**:
+  - `ConfigurationTab.vue`: Tags 섹션
+  - `MaasController.getTags()`: API 엔드포인트
+  - `MaasApiService.getAllTags()`: MAAS API 호출
+- **내부 로직 흐름**:
+  1. 컴포넌트 마운트 시 자동 로드
+  2. 백엔드 `/api/tags` 엔드포인트 호출
+  3. MAAS API `/MAAS/api/2.0/tags/` 호출
+  4. 태그 정보 파싱 (name, definition, comment, kernel_opts)
+  5. 테이블 형태로 표시
+  6. 태그 이름을 배지 스타일로 표시
+- **에러 처리**:
+  - API 호출 실패 시 에러 메시지 표시
+  - Retry 버튼 제공
+
+#### 기능명: Cloud-Config 템플릿 관리
+- **설명**: OS 배포 시 사용할 Cloud-Config 템플릿을 생성, 수정, 삭제
+- **입력**: 
+  - 템플릿 이름 (필수)
+  - 태그 선택 (체크박스, 다중 선택 가능)
+  - 설명 (선택)
+  - Cloud-Config YAML (필수)
+- **출력**: 템플릿 목록 테이블 및 편집 모달
+- **주요 코드 파일**:
+  - `ConfigurationTab.vue`: Cloud-Config Templates 섹션
+  - localStorage: `maas-cloud-config-templates` 키로 저장
+- **내부 로직 흐름**:
+  1. 컴포넌트 마운트 시 localStorage에서 템플릿 목록 로드
+  2. 기존 데이터 마이그레이션 (단일 tag → tags 배열)
+  3. 템플릿 목록 테이블 표시
+  4. "+ Add Template" 버튼 클릭 시 템플릿 생성 모달 표시
+  5. 템플릿 편집 버튼 클릭 시 편집 모달 표시
+  6. 모달에서:
+     - Name 입력
+     - MAAS Tags 목록에서 체크박스로 태그 선택 (다중 선택 가능)
+     - Description 입력
+     - Cloud-Config YAML 입력 (코드 에디터 스타일)
+  7. "Create" 또는 "Update" 버튼 클릭
+  8. 템플릿 데이터 저장 (localStorage)
+  9. 템플릿 목록 새로고침
+- **태그 연계**:
+  - 하나의 템플릿은 여러 태그와 연관 가능 (tags 배열)
+  - Deploy 시 머신의 태그와 템플릿의 태그를 비교하여 매칭
+  - 매칭되는 템플릿이 "Recommended" 그룹에 우선 표시
+- **데이터 저장**:
+  - localStorage에 JSON 형식으로 저장
+  - 각 템플릿은 id, name, tags, description, cloudConfig, createdAt, updatedAt 필드 포함
+- **에러 처리**:
+  - 필수 필드 검증 (Name, Cloud-Config YAML)
+  - localStorage 저장 실패 시 에러 로그
+
+### 3.3 Machines Tab 기능
 
 #### 기능명: 머신 목록 조회 및 표시
 - **설명**: MAAS에 등록된 모든 머신을 테이블 형태로 표시
@@ -558,52 +637,73 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **동작**: Fabric 변경과 IP Assignment를 Static으로 설정하고 IP를 입력한 후 Save Changes를 한 번에 실행하면, unlink 실패가 있어도 Fabric 변경과 IP Assignment 저장이 모두 완료되어 2단계 작업이 1단계로 처리됩니다.
 
 #### 기능명: 머신 배포 (Deploy)
-- **설명**: 커미셔닝된 머신에 OS를 배포
+- **설명**: 커미셔닝된 머신에 OS를 배포하며, Cloud-Config 템플릿을 선택하여 userdata를 설정할 수 있습니다
 - **입력**: 
   - System ID
   - OS 선택 (OS 이름, Release, Architecture)
+  - Cloud-Config 템플릿 선택 (선택사항)
+  - Custom Cloud-Config 입력 (선택사항)
 - **출력**: 배포 작업 시작 결과
 - **주요 코드 파일**:
-  - `MachinesTab.vue`: Deploy 버튼 클릭 핸들러, OS 선택 드롭다운
+  - `MachinesTab.vue`: Deploy 버튼 클릭 핸들러, Deploy 모달
   - `MaasController.deployMachine()`: API 엔드포인트
   - `MaasApiService.deployMachine()`: MAAS API 호출
+  - `ConfigurationTab.vue`: Cloud-Config 템플릿 관리
 - **내부 로직 흐름**:
   1. "Deploy" 버튼 클릭 (Ready 또는 Allocated 상태에서만 활성화)
-  2. Deploy 버튼 옆에 드롭다운 아이콘(▼) 표시 (호버 또는 메뉴 열림 시)
-  3. 드롭다운 아이콘 클릭 시 OS 선택 메뉴 표시
-  4. Deployable OS 목록 로드 (`/api/deployable-os` 호출, 최초 1회만)
-  5. OS 목록 정렬 및 기본값 설정:
+  2. Deploy 모달 표시
+  3. Deployable OS 목록 로드 (`/api/deployable-os` 호출, 최초 1회만)
+  4. Cloud-Config 템플릿 목록 로드 (localStorage에서)
+  5. 머신의 태그와 매칭되는 템플릿 자동 필터링
+  6. OS 목록 정렬 및 기본값 설정:
      - OS 이름별로 그룹화
-     - 각 OS별 최신 release를 기본값으로 표시 (옅은 하늘색 배경)
+     - 각 OS별 최신 release를 기본값으로 자동 선택
      - OS 이름 → release (최신순) 정렬
-  6. 사용자가 OS 선택:
-     - 기본값 OS는 자동 선택됨
-     - 다른 OS 선택 시 해당 OS로 배포
-  7. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
-     - 요청 파라미터: `maasUrl`, `apiKey`, `os`, `release`, `arch`
-  8. 백엔드에서 Form Data 생성:
-     - `distro_series`: `os/release` 형식 (예: `ubuntu/noble`, `ubuntu/jammy`)
-     - `architecture`: 선택된 architecture (있는 경우)
-  9. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
-     - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
-     - `BodyInserters.fromFormData()` 사용
-  10. 성공 시:
+  7. 템플릿 목록 표시:
+     - "Recommended (matches machine tags)" 그룹: 머신 태그와 매칭되는 템플릿 우선 표시
+     - "Other Templates" 그룹: 매칭되지 않은 템플릿
+     - "None" 옵션: Cloud-Config 없이 배포
+     - "Custom..." 옵션: 직접 Cloud-Config YAML 입력
+  8. 사용자가 OS 및 Cloud-Config 템플릿 선택:
+     - OS는 필수 선택
+     - Cloud-Config 템플릿은 선택사항 (None, 템플릿 선택, Custom)
+  9. 템플릿 선택 시 미리보기 표시
+  10. "Deploy" 버튼 클릭
+  11. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
+      - 요청 파라미터: `maasUrl`, `apiKey`, `os`, `release`, `arch`
+      - userdata는 향후 추가 예정
+  12. 백엔드에서 Form Data 생성:
+      - `distro_series`: `os/release` 형식 (예: `ubuntu/noble`, `ubuntu/jammy`)
+      - `architecture`: 선택된 architecture (있는 경우)
+      - `userdata`: 선택된 템플릿의 Cloud-Config 또는 Custom Cloud-Config (향후 추가)
+  13. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
+      - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
+      - `BodyInserters.fromFormData()` 사용
+  14. 성공 시:
+      - 모달 닫기
       - 버튼이 "Abort"로 변경
       - 머신 상태가 "Deploying"으로 변경
       - 선택된 OS 정보 저장 (`deployingOS`, `deployingRelease`)
       - STATUS 컬럼에 OS 버전 표시 (예: "Ubuntu 24.04")
-  11. WebSocket을 통한 상태 업데이트 수신
+  15. WebSocket을 통한 상태 업데이트 수신
 - **UI/UX 특징**:
-  - Deploy 버튼 옆에 드롭다운 아이콘(▼) 표시 (호버 또는 메뉴 열림 시)
-  - OS 선택 드롭다운 메뉴는 Power 드롭다운과 동일한 스타일
-  - 기본값 OS는 옅은 하늘색 배경으로 표시
-  - 마우스 호버 시 진한 하늘색 배경 (`#d0e7ff`)
-  - OS 이름과 release 표시 (예: "Ubuntu 24.04 LTS")
-  - 드롭다운 메뉴 위치는 Deploy 버튼 기준으로 계산 (position: fixed)
+  - Deploy 모달: OS 선택과 Cloud-Config 설정을 한 화면에서 처리
+  - OS 선택 드롭다운: 기본값 OS 자동 선택
+  - 템플릿 선택 드롭다운: 머신 태그와 매칭되는 템플릿 우선 표시
+  - 템플릿 미리보기: 선택된 템플릿의 Cloud-Config YAML 표시
+  - Custom Cloud-Config: YAML 에디터 (monospace 폰트)
+  - 모달 드래그 가능: Network 모달과 동일한 드래그 기능
+- **태그 기반 템플릿 추천**:
+  - 머신의 태그와 템플릿의 태그를 비교하여 매칭
+  - 하나의 템플릿은 여러 태그를 가질 수 있음 (tags 배열)
+  - 하나의 머신도 여러 태그를 가질 수 있음
+  - 매칭되는 템플릿이 여러 개일 경우 모두 "Recommended" 그룹에 표시
+  - 사용자가 최종 템플릿 선택
 - **에러 처리**:
   - 배포 불가능한 상태에서는 버튼 비활성화
   - API 오류 메시지 표시
   - Deployable OS 목록 로드 실패 시 기본값 사용
+  - Cloud-Config 템플릿 로드 실패 시 "None" 옵션만 표시
 
 #### 기능명: Power 관리 (Power Management)
 - **설명**: 머신의 전원 상태 확인 및 전원 제어 (켜기/끄기)
@@ -1110,9 +1210,14 @@ New (다시 시작)
   - `getDeployButtonClass()`: Deploy 버튼 색상 결정
   - `getDeployButtonDisabled()`: Deploy 버튼 활성화 여부 결정
   - `handleDeployButtonClick()`: Deploy 버튼 클릭 처리
-  - `toggleDeployMenu()`: Deploy OS 선택 드롭다운 메뉴 토글
+  - `showDeployModal()`: Deploy 모달 표시
+  - `closeDeployModal()`: Deploy 모달 닫기
+  - `startDeployFromModal()`: 모달에서 배포 시작
   - `loadDeployableOS()`: Deployable OS 목록 로드
-  - `selectDeployOS()`: OS 선택 및 배포 시작
+  - `loadCloudConfigTemplates()`: Cloud-Config 템플릿 목록 로드
+  - `matchedTemplates`: 머신 태그와 매칭되는 템플릿 (computed)
+  - `otherTemplates`: 매칭되지 않은 템플릿 (computed)
+  - `getSelectedTemplateCloudConfig`: 선택된 템플릿의 Cloud-Config (computed)
   - `deployMachine()`: 머신 배포 (OS 파라미터 포함)
   - `formatOSName()`: OS 이름 포맷팅
   - `getOSSortKey()`: OS 정렬 키 계산
@@ -1464,12 +1569,14 @@ public class MaasController {
   - 형식: `os/release` (예: `ubuntu/noble`, `ubuntu/jammy`)
   - Form Data 생성 (`MultiValueMap<String, String>`)
   - `distro_series`와 `architecture`를 Form Data에 추가
+  - `userdata`는 향후 추가 예정 (선택된 Cloud-Config 템플릿 또는 Custom Cloud-Config)
   - `BodyInserters.fromFormData()`를 사용하여 MAAS API로 전송
 - **MAAS API**: `POST /MAAS/api/2.0/machines/{systemId}/op-deploy`
   - 요청 형식: **Form Data** (`application/x-www-form-urlencoded`)
   - Form Data 필드:
     - `distro_series` (선택): OS/release 형식 (예: `ubuntu/noble`)
     - `architecture` (선택): Architecture (예: `amd64`)
+    - `userdata` (향후 추가): Cloud-Config YAML
 - **응답**:
 ```json
 {
@@ -2049,6 +2156,27 @@ maas.default.api-key=consumer_key:token:token_secret
     - **Network**: 파랑 (저장 가능), 연한 파랑 (읽기 전용), 회색 (비활성화)
     - **Deploy**: 분홍색 (활성화), 주황색 (Abort), 회색 (비활성화)
     - **Release**: Release 전용 스타일 (Failed 상태)
+
+#### Configuration Tab
+- **레이아웃**: 섹션별 카드 형태
+- **컴포넌트**:
+  - **Images 섹션**: Deploy 가능한 OS 이미지 목록
+    - OS, Release, Version, Architecture 컬럼으로 테이블 구성
+    - Ubuntu release 버전 매핑 (xenial → 16.04 LTS 등)
+    - 로딩/에러 상태 처리
+  - **Tags 섹션**: MAAS 태그 목록
+    - Name, Definition, Comment, Kernel Options 컬럼으로 테이블 구성
+    - 태그 이름을 배지 스타일로 표시
+    - 로딩/에러 상태 처리
+  - **Cloud-Config Templates 섹션**: Cloud-Config 템플릿 관리
+    - 템플릿 목록 테이블 (Name, Tags, Description, Actions)
+    - "+ Add Template" 버튼
+    - 템플릿 편집/삭제 기능
+    - 템플릿 생성/편집 모달:
+      - Name (필수), Tags (체크박스 선택), Description, Cloud-Config YAML (필수)
+      - MAAS Tags 목록에서 체크박스로 선택
+      - 태그 comment 표시
+- **스타일**: 카드 형태의 섹션, 테이블, 모달
 
 #### Settings Tab
 - **레이아웃**: 섹션별 폼

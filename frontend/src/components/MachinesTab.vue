@@ -480,43 +480,131 @@
       </div>
     </Teleport>
 
-    <!-- Deploy OS Dropdown Menu (Teleport outside of v-for) -->
-    <Teleport to="body">
+    <!-- Deploy Modal -->
+    <div v-if="showDeployModalState" class="modal-overlay" @click="closeDeployModal">
       <div 
-        v-if="openDeployMenu && deployMenuPosition && deployMenuPosition.top !== undefined"
-        class="deploy-dropdown-menu"
-        :style="{
-          top: ((deployMenuPosition && deployMenuPosition.top) || 0) + 'px',
-          left: ((deployMenuPosition && deployMenuPosition.left) || 0) + 'px'
-        }"
+        class="modal-content deploy-modal-content" 
+        :style="(deployModalPosition?.top || deployModalPosition?.left) ? { position: 'fixed', top: (deployModalPosition?.top || 0) + 'px', left: (deployModalPosition?.left || 0) + 'px', margin: 0 } : {}"
         @click.stop
       >
-        <div class="deploy-dropdown-header">SELECT OS:</div>
         <div 
-          v-if="loadingDeployableOS"
-          class="deploy-dropdown-item disabled"
+          class="modal-header modal-draggable-header"
+          @mousedown="startDragDeployModal"
+          :style="isDraggingDeployModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
-          Loading OS images...
+          <h3>Deploy Machine - {{ selectedDeployMachine?.hostname || selectedDeployMachine?.id }}</h3>
+          <button class="close-btn" @click="closeDeployModal">&times;</button>
         </div>
-        <div 
-          v-else-if="deployableOSList.length === 0"
-          class="deploy-dropdown-item disabled"
-        >
-          No OS images available
+        
+        <div class="deploy-modal-body">
+          <div v-if="loadingDeployableOS" class="loading">
+            <p>Loading OS images...</p>
+          </div>
+          
+          <div v-else-if="deployableOSList.length === 0" class="error">
+            <p>No OS images available</p>
+          </div>
+          
+          <div v-else class="deploy-form">
+            <!-- OS Selection -->
+            <div class="form-section">
+              <label class="form-label">Operating System</label>
+              <select 
+                v-model="selectedDeployOS" 
+                class="form-select"
+                :disabled="deployingMachine"
+              >
+                <option :value="null">Select OS...</option>
+                <option 
+                  v-for="os in deployableOSList"
+                  :key="`${os.os}-${os.release}-${os.arches?.join(',') || ''}`"
+                  :value="os"
+                >
+                  {{ formatOSName(os.os, os.release) }} 
+                  <span v-if="os.arches && os.arches.length > 0">({{ os.arches.join(', ') }})</span>
+                  <span v-if="os.isDefault" class="default-badge"> - Default</span>
+                </option>
+              </select>
+            </div>
+            
+            <!-- Cloud-Config Template Selection -->
+            <div class="form-section">
+              <label class="form-label">Cloud-Config Template</label>
+              <select 
+                v-model="selectedCloudConfigTemplate" 
+                class="form-select"
+                :disabled="deployingMachine"
+              >
+                <option value="none">None</option>
+                <optgroup v-if="matchedTemplates.length > 0" label="Recommended (matches machine tags)">
+                  <option 
+                    v-for="template in matchedTemplates"
+                    :key="template.id"
+                    :value="template.id"
+                  >
+                    {{ template.name }}<span v-if="template.tags && template.tags.length > 0"> ({{ template.tags.join(', ') }})</span>
+                  </option>
+                </optgroup>
+                <optgroup v-if="otherTemplates.length > 0" label="Other Templates">
+                  <option 
+                    v-for="template in otherTemplates"
+                    :key="template.id"
+                    :value="template.id"
+                  >
+                    {{ template.name }}<span v-if="template.tags && template.tags.length > 0"> ({{ template.tags.join(', ') }})</span>
+                  </option>
+                </optgroup>
+                <option value="custom">Custom...</option>
+              </select>
+              <p v-if="selectedCloudConfigTemplate !== 'none' && selectedCloudConfigTemplate !== 'custom' && getSelectedTemplateCloudConfig" class="form-hint">
+                Template: {{ cloudConfigTemplates.find(t => t.id === selectedCloudConfigTemplate)?.description || 'No description' }}
+              </p>
+              <p v-else-if="matchedTemplates.length > 0" class="form-hint">
+                {{ matchedTemplates.length }} template(s) match this machine's tags. Recommended templates are shown first.
+              </p>
+              <p v-else class="form-hint">Select a template or choose Custom to enter your own</p>
+            </div>
+            
+            <!-- Template Preview -->
+            <div v-if="selectedCloudConfigTemplate !== 'none' && selectedCloudConfigTemplate !== 'custom' && getSelectedTemplateCloudConfig" class="form-section">
+              <label class="form-label">Template Preview</label>
+              <pre class="template-preview">{{ getSelectedTemplateCloudConfig }}</pre>
+            </div>
+            
+            <!-- Custom Cloud-Config Input -->
+            <div v-if="selectedCloudConfigTemplate === 'custom'" class="form-section">
+              <label class="form-label">Custom Cloud-Config</label>
+              <textarea 
+                v-model="customCloudConfig"
+                class="form-textarea code-editor"
+                rows="10"
+                placeholder="#cloud-config&#10;users:&#10;  - name: ubuntu&#10;    ssh-authorized-keys:&#10;      - ssh-rsa ..."
+                :disabled="deployingMachine"
+              ></textarea>
+              <p class="form-hint">Enter cloud-config YAML format (userdata will be added later)</p>
+            </div>
+          </div>
         </div>
-        <div 
-          v-else
-          v-for="os in deployableOSList"
-          :key="`${os.os}-${os.release}-${os.arches?.join(',') || ''}`"
-          class="deploy-dropdown-item"
-          :class="{ 'default': os.isDefault }"
-          @click="selectDeployOS(getMachineById(openDeployMenu), os)"
-        >
-          <span class="os-name">{{ formatOSName(os.os, os.release) }}</span>
-          <span class="os-arch" v-if="os.arches && os.arches.length > 0">({{ os.arches.join(', ') }})</span>
+        
+        <div class="modal-footer">
+          <button 
+            class="btn-secondary btn-sm" 
+            @click="closeDeployModal"
+            :disabled="deployingMachine"
+          >
+            Cancel
+          </button>
+          <button 
+            class="btn-primary btn-sm" 
+            @click="startDeployFromModal"
+            :disabled="!selectedDeployOS || deployingMachine"
+          >
+            <span v-if="deployingMachine">Deploying...</span>
+            <span v-else>Deploy</span>
+          </button>
         </div>
       </div>
-    </Teleport>
+    </div>
         
     <div v-if="!loading && !error && filteredMachines.length === 0" class="no-machines">
       <p>No machines found matching your criteria.</p>
@@ -2342,6 +2430,20 @@ export default {
     const networkModalPosition = ref({ top: 0, left: 0 })
     const networkDragStartPosition = ref({ x: 0, y: 0 })
     
+    // Deploy Modal drag state
+    const isDraggingDeployModal = ref(false)
+    const deployModalPosition = ref({ top: 0, left: 0 })
+    const deployDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Deploy Modal state
+    const showDeployModalState = ref(false)
+    const selectedDeployMachine = ref(null)
+    const selectedDeployOS = ref(null)
+    const selectedCloudConfigTemplate = ref('none')
+    const customCloudConfig = ref('')
+    const deployingMachine = ref(false)
+    const cloudConfigTemplates = ref([])
+    
     // Machine Details Modal Functions
     const showMachineDetails = async (machine) => {
       selectedMachineForDetails.value = machine
@@ -2881,6 +2983,68 @@ export default {
       } else {
         document.removeEventListener('mousemove', onDragNetworkModal)
         document.removeEventListener('mouseup', stopDragNetworkModal)
+      }
+    })
+    
+    // Deploy Modal drag handlers
+    const startDragDeployModal = (event) => {
+      if (event.button !== 0) return
+      isDraggingDeployModal.value = true
+      const modalElement = event.currentTarget.closest('.deploy-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        deployDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        if (deployModalPosition.value.top === 0 && deployModalPosition.value.left === 0) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          deployModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragDeployModal = (event) => {
+      if (!isDraggingDeployModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.deploy-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - deployDragStartPosition.value.x
+      let newTop = event.clientY - deployDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      deployModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragDeployModal = () => {
+      isDraggingDeployModal.value = false
+    }
+    
+    watch(isDraggingDeployModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragDeployModal)
+        document.addEventListener('mouseup', stopDragDeployModal)
+      } else {
+        document.removeEventListener('mousemove', onDragDeployModal)
+        document.removeEventListener('mouseup', stopDragDeployModal)
       }
     })
     
@@ -4206,87 +4370,133 @@ export default {
       if (status === 'deploying') {
         abortDeploy(machine)
       } else if (status === 'ready' || status === 'allocated') {
-        // OS 선택 메뉴 표시
+        // Deploy 모달 표시
         if (event) {
           event.stopPropagation()
         }
-        toggleDeployMenu(machine.id, event)
+        showDeployModal(machine)
       }
     }
     
-    // Deploy OS 메뉴 토글
-    const toggleDeployMenu = async (machineId, event) => {
-      console.log('toggleDeployMenu called:', machineId, event)
-      if (openDeployMenu.value === machineId) {
-        openDeployMenu.value = null
-        deployMenuPosition.value = { top: 0, left: 0 }
-      } else {
-        // OS 목록 로드
-        if (deployableOSList.value.length === 0 && !loadingDeployableOS.value) {
-          console.log('Loading deployable OS list...')
-          await loadDeployableOS()
-        }
-        
-        // 클릭한 버튼의 위치 계산
-        let buttonRect = null
-        if (event && event.target) {
-          const deployContainer = event.target.closest('.deploy-button-container')
-          if (deployContainer) {
-            buttonRect = deployContainer.getBoundingClientRect()
-          } else {
-            // 버튼 자체를 클릭한 경우
-            const button = event.target.closest('button')
-            if (button) {
-              buttonRect = button.getBoundingClientRect()
+    // Load Cloud-Config Templates from localStorage
+    const loadCloudConfigTemplates = () => {
+      try {
+        const stored = localStorage.getItem('maas-cloud-config-templates')
+        if (stored) {
+          const templates = JSON.parse(stored)
+          // Migrate old format (tag -> tags)
+          cloudConfigTemplates.value = templates.map(template => {
+            if (template.tag && !template.tags) {
+              // Old format: single tag
+              return {
+                ...template,
+                tags: template.tag ? [template.tag] : []
+              }
+            } else if (!template.tags) {
+              // No tags at all
+              return {
+                ...template,
+                tags: []
+              }
             }
-          }
-        }
-        
-        // event가 없거나 buttonRect를 찾지 못한 경우, DOM에서 찾기
-        if (!buttonRect) {
-          const machine = getMachineById(machineId)
-          if (machine) {
-            // DOM에서 해당 머신의 deploy-button-container 찾기
-            setTimeout(() => {
-              const allContainers = document.querySelectorAll('.deploy-button-container')
-              for (const container of allContainers) {
-                // 부모 요소에서 머신 ID 찾기
-                const row = container.closest('tr')
-                if (row) {
-                  const rowData = row.getAttribute('data-machine-id')
-                  if (rowData === machineId) {
-                    buttonRect = container.getBoundingClientRect()
-                    break
-                  }
-                }
-              }
-              
-              if (buttonRect) {
-                deployMenuPosition.value = {
-                  top: buttonRect.bottom + 4,
-                  left: buttonRect.left
-                }
-                openDeployMenu.value = machineId
-                console.log('Deploy menu opened at:', deployMenuPosition.value)
-              } else {
-                console.warn('Could not find deploy button container for machine:', machineId)
-              }
-            }, 0)
-            return
-          }
-        }
-        
-        if (buttonRect) {
-          deployMenuPosition.value = {
-            top: buttonRect.bottom + 4,
-            left: buttonRect.left
-          }
-          openDeployMenu.value = machineId
-          console.log('Deploy menu opened at:', deployMenuPosition.value)
+            return template
+          })
+          // Save migrated data back to localStorage
+          localStorage.setItem('maas-cloud-config-templates', JSON.stringify(cloudConfigTemplates.value))
         } else {
-          console.warn('Could not get deploy button position')
-          openDeployMenu.value = null
+          cloudConfigTemplates.value = []
         }
+      } catch (err) {
+        console.error('Error loading cloud-config templates:', err)
+        cloudConfigTemplates.value = []
+      }
+    }
+    
+    // Get selected template's cloud-config
+    const getSelectedTemplateCloudConfig = computed(() => {
+      if (selectedCloudConfigTemplate.value === 'none' || selectedCloudConfigTemplate.value === 'custom') {
+        return null
+      }
+      const template = cloudConfigTemplates.value.find(t => t.id === selectedCloudConfigTemplate.value)
+      return template ? template.cloudConfig : null
+    })
+    
+    // Get templates that match machine tags
+    const matchedTemplates = computed(() => {
+      if (!selectedDeployMachine.value || !selectedDeployMachine.value.tags || selectedDeployMachine.value.tags.length === 0) {
+        return []
+      }
+      
+      const machineTags = selectedDeployMachine.value.tags.map(tag => tag.toLowerCase())
+      
+      return cloudConfigTemplates.value.filter(template => {
+        if (!template.tags || template.tags.length === 0) {
+          return false
+        }
+        // Check if any template tag matches any machine tag
+        return template.tags.some(tag => machineTags.includes(tag.toLowerCase()))
+      })
+    })
+    
+    // Get templates that don't match machine tags
+    const otherTemplates = computed(() => {
+      const matchedIds = new Set(matchedTemplates.value.map(t => t.id))
+      return cloudConfigTemplates.value.filter(template => !matchedIds.has(template.id))
+    })
+    
+    // Deploy Modal Functions
+    const showDeployModal = async (machine) => {
+      selectedDeployMachine.value = machine
+      showDeployModalState.value = true
+      selectedDeployOS.value = null
+      selectedCloudConfigTemplate.value = 'none'
+      customCloudConfig.value = ''
+      deployingMachine.value = false
+      
+      // Load cloud-config templates
+      loadCloudConfigTemplates()
+      
+      // OS 목록 로드
+      if (deployableOSList.value.length === 0 && !loadingDeployableOS.value) {
+        console.log('Loading deployable OS list...')
+        await loadDeployableOS()
+      }
+      
+      // 기본 OS 선택
+      if (deployableOSList.value.length > 0 && !selectedDeployOS.value) {
+        const defaultOS = deployableOSList.value.find(o => o.isDefault)
+        if (defaultOS) {
+          selectedDeployOS.value = defaultOS
+        } else {
+          selectedDeployOS.value = deployableOSList.value[0]
+        }
+      }
+    }
+    
+    const closeDeployModal = () => {
+      if (deployingMachine.value) return // 배포 중이면 닫기 방지
+      showDeployModalState.value = false
+      selectedDeployMachine.value = null
+      selectedDeployOS.value = null
+      selectedCloudConfigTemplate.value = 'none'
+      customCloudConfig.value = ''
+    }
+    
+    const startDeployFromModal = async () => {
+      if (!selectedDeployMachine.value || !selectedDeployOS.value) {
+        return
+      }
+      
+      deployingMachine.value = true
+      try {
+        await deployMachine(selectedDeployMachine.value, selectedDeployOS.value)
+        // 배포 시작 성공 시 모달 닫기
+        closeDeployModal()
+      } catch (err) {
+        console.error('Error starting deploy from modal:', err)
+        // 에러 발생 시 모달은 열어두고 에러 메시지 표시
+      } finally {
+        deployingMachine.value = false
       }
     }
     
@@ -6706,15 +6916,23 @@ export default {
         handlePowerAction,
         handleCheckPower,
         getMachineById,
-        // Deploy Menu
-        hoveredDeployMachine,
-        openDeployMenu,
-        deployMenuPosition,
+        // Deploy Modal
+        showDeployModalState,
+        selectedDeployMachine,
+        selectedDeployOS,
+        selectedCloudConfigTemplate,
+        customCloudConfig,
+        deployingMachine,
+        cloudConfigTemplates,
+        getSelectedTemplateCloudConfig,
+        matchedTemplates,
+        otherTemplates,
+        showDeployModal,
+        closeDeployModal,
+        startDeployFromModal,
         deployableOSList,
         loadingDeployableOS,
-        toggleDeployMenu,
         formatOSName,
-        selectDeployOS,
         // Action Bar
         openActionsMenu,
         openPowerActionMenu,
@@ -6780,6 +6998,9 @@ export default {
         networkModalPosition,
         isDraggingNetworkModal,
         startDragNetworkModal,
+        deployModalPosition,
+        isDraggingDeployModal,
+        startDragDeployModal,
         // Network Modal
         showNetworkModalState,
         selectedMachine,
@@ -8089,6 +8310,72 @@ export default {
   padding: 1.5rem;
   max-height: calc(90vh - 120px);
   overflow-y: auto;
+}
+
+/* Deploy Modal Styles */
+.deploy-modal-content {
+  max-width: 600px;
+  max-height: 90vh;
+  transition: none; /* Disable transition during drag */
+}
+
+.deploy-modal-content.dragging {
+  transition: none;
+}
+
+.deploy-modal-body {
+  padding: 1.5rem;
+  max-height: calc(90vh - 120px);
+  overflow-y: auto;
+}
+
+.deploy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.form-hint {
+  font-size: 0.75rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+}
+
+.default-badge {
+  color: #007bff;
+  font-weight: 600;
+}
+
+.template-preview {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 1rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  color: #495057;
+  margin: 0;
+}
+
+.code-editor {
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
 }
 
 .network-interfaces-list {

@@ -616,6 +616,27 @@ public class MaasController {
     }
     
     /**
+     * 태그 목록을 조회합니다.
+     */
+    @GetMapping("/tags")
+    public Mono<ResponseEntity<Map<String, Object>>> getTags(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        return maasApiService.getAllTags(maasUrl, apiKey)
+                .map(tagsList -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("results", tagsList);
+                    response.put("count", tagsList.size());
+                    return ResponseEntity.ok(response);
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("error", "Failed to fetch tags: " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+                });
+    }
+    
+    /**
      * 헬스 체크 엔드포인트
      */
     @GetMapping("/health")
