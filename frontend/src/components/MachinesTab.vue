@@ -481,7 +481,7 @@
     </Teleport>
 
     <!-- Deploy Modal -->
-    <div v-if="showDeployModalState" class="modal-overlay" @click="closeDeployModal">
+    <div v-if="showDeployModalState" class="modal-overlay">
       <div 
         class="modal-content deploy-modal-content" 
         :style="(deployModalPosition?.top || deployModalPosition?.left) ? { position: 'fixed', top: (deployModalPosition?.top || 0) + 'px', left: (deployModalPosition?.left || 0) + 'px', margin: 0 } : {}"

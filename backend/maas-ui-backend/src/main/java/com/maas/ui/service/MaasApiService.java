@@ -6,6 +6,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.http.MediaType;
 import reactor.core.publisher.Mono;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -1939,6 +1940,181 @@ public class MaasApiService {
                     System.err.println("Error fetching tags: " + e.getMessage());
                     e.printStackTrace();
                     return Mono.just(new ArrayList<Map<String, Object>>());
+                });
+    }
+    
+    /**
+     * MAAS 서버에 새 태그를 생성합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param name 태그 이름
+     * @param comment 태그 설명
+     * @param definition 태그 정의 (일단 빈 문자열)
+     * @param kernelOpts 커널 옵션 (일단 빈 문자열)
+     * @return 생성된 태그 정보
+     */
+    public Mono<Map<String, Object>> createTag(String maasUrl, String apiKey, String name, String comment, String definition, String kernelOpts) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/tags/";
+        
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("name", name != null ? name : "");
+        formData.add("comment", comment != null ? comment : "");
+        formData.add("definition", definition != null ? definition : "");
+        formData.add("kernel_opts", kernelOpts != null ? kernelOpts : "");
+        
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Create Tag API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> tagMap = new HashMap<>();
+                        if (jsonNode.has("name")) {
+                            tagMap.put("name", jsonNode.get("name").asText());
+                        }
+                        if (jsonNode.has("definition")) {
+                            tagMap.put("definition", jsonNode.get("definition").asText());
+                        }
+                        if (jsonNode.has("comment")) {
+                            tagMap.put("comment", jsonNode.get("comment").asText());
+                        }
+                        if (jsonNode.has("kernel_opts")) {
+                            tagMap.put("kernel_opts", jsonNode.get("kernel_opts").asText());
+                        }
+                        return tagMap;
+                    } catch (Exception e) {
+                        System.err.println("Error parsing create tag response: " + e.getMessage());
+                        e.printStackTrace();
+                        throw new RuntimeException("Failed to parse tag creation response", e);
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Create Tag API Error: " + e.getMessage());
+                    e.printStackTrace();
+                    return Mono.error(new RuntimeException("Failed to create tag: " + e.getMessage()));
+                });
+    }
+    
+    /**
+     * MAAS 서버의 태그를 수정합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param oldName 원래 태그 이름
+     * @param newName 새 태그 이름
+     * @param comment 태그 설명
+     * @param definition 태그 정의 (일단 빈 문자열)
+     * @return 수정된 태그 정보
+     */
+    public Mono<Map<String, Object>> updateTag(String maasUrl, String apiKey, String oldName, String newName, String comment, String definition) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/tags/" + oldName + "/";
+        
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("name", newName != null ? newName : "");
+        formData.add("comment", comment != null ? comment : "");
+        formData.add("definition", definition != null ? definition : "");
+        
+        return webClient.put()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(BodyInserters.fromFormData(formData))
+                .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(), response -> {
+                    return response.bodyToMono(String.class)
+                            .flatMap(errorBody -> {
+                                System.out.println("Update Tag API Error Response: " + errorBody);
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(errorBody);
+                                    String errorMessage = jsonNode.has("error") ? jsonNode.get("error").asText() : errorBody;
+                                    return Mono.error(new RuntimeException(errorMessage));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException(errorBody));
+                                }
+                            });
+                })
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(responseBody -> {
+                    try {
+                        JsonNode jsonNode = objectMapper.readTree(responseBody);
+                        Map<String, Object> tagMap = new HashMap<>();
+                        if (jsonNode.has("name")) {
+                            tagMap.put("name", jsonNode.get("name").asText());
+                        }
+                        if (jsonNode.has("definition")) {
+                            tagMap.put("definition", jsonNode.get("definition").asText());
+                        }
+                        if (jsonNode.has("comment")) {
+                            tagMap.put("comment", jsonNode.get("comment").asText());
+                        }
+                        if (jsonNode.has("kernel_opts")) {
+                            tagMap.put("kernel_opts", jsonNode.get("kernel_opts").asText());
+                        }
+                        return tagMap;
+                    } catch (Exception e) {
+                        System.err.println("Error parsing update tag response: " + e.getMessage());
+                        e.printStackTrace();
+                        throw new RuntimeException("Failed to parse tag update response", e);
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Update Tag API Error: " + e.getMessage());
+                    e.printStackTrace();
+                    return Mono.error(new RuntimeException("Failed to update tag: " + e.getMessage()));
+                });
+    }
+    
+    /**
+     * MAAS 서버에서 태그를 삭제합니다.
+     * 
+     * @param maasUrl MAAS 서버 URL
+     * @param apiKey MAAS API 키
+     * @param name 태그 이름
+     * @return 삭제 성공 여부
+     */
+    public Mono<Boolean> deleteTag(String maasUrl, String apiKey, String name) {
+        String authHeader = authService.generateAuthHeader(apiKey);
+        String url = maasUrl + "/MAAS/api/2.0/tags/" + name + "/";
+        
+        return webClient.delete()
+                .uri(url)
+                .header("Authorization", authHeader)
+                .header("Accept", "application/json")
+                .retrieve()
+                .toBodilessEntity()
+                .timeout(Duration.ofSeconds(30))
+                .map(responseEntity -> {
+                    // 204 NO_CONTENT or 200 OK - both indicate success
+                    return true;
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Delete Tag API Error: " + e.getMessage());
+                    e.printStackTrace();
+                    return Mono.error(new RuntimeException("Failed to delete tag: " + e.getMessage()));
                 });
     }
 }

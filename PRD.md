@@ -235,15 +235,18 @@ MachinesTab.vue (실시간 UI 업데이트)
   - API 호출 실패 시 에러 메시지 표시
   - Retry 버튼 제공
 
-#### 기능명: MAAS 태그 목록 조회
-- **설명**: MAAS에 등록된 모든 태그 목록을 조회하여 표시
-- **입력**: 없음 (자동 로드)
+#### 기능명: MAAS 태그 관리
+- **설명**: MAAS에 등록된 모든 태그 목록을 조회하고, 태그를 생성, 수정, 삭제할 수 있는 기능
+- **입력**: 
+  - 태그 생성/수정: Name (필수), Comment, Kernel Options, Definition
+  - 태그 삭제: 태그 행 클릭 후 Delete 버튼
 - **출력**: 태그 목록 테이블
   - Name, Definition, Comment, Kernel Options 컬럼
+  - 태그 행 클릭 시 태그 정보 모달 표시
 - **주요 코드 파일**:
   - `ConfigurationTab.vue`: Tags 섹션
-  - `MaasController.getTags()`: API 엔드포인트
-  - `MaasApiService.getAllTags()`: MAAS API 호출
+  - `MaasController.getTags()`, `createTag()`, `updateTag()`, `deleteTag()`: API 엔드포인트
+  - `MaasApiService.getAllTags()`, `createTag()`, `updateTag()`, `deleteTag()`: MAAS API 호출
 - **내부 로직 흐름**:
   1. 컴포넌트 마운트 시 자동 로드
   2. 백엔드 `/api/tags` 엔드포인트 호출
@@ -251,8 +254,14 @@ MachinesTab.vue (실시간 UI 업데이트)
   4. 태그 정보 파싱 (name, definition, comment, kernel_opts)
   5. 테이블 형태로 표시
   6. 태그 이름을 배지 스타일로 표시
+  7. "+ Add Tag" 버튼 클릭 시 태그 생성 모달 표시
+  8. 태그 행 클릭 시 태그 정보 모달 표시 (수정/삭제 가능)
+  9. 태그 삭제 시 커스텀 확인 모달 표시
+  10. 삭제 확인 후 MAAS API `DELETE /MAAS/api/2.0/tags/{name}/` 호출
+  11. 204 NO_CONTENT 응답 처리
+  12. 태그 목록 자동 새로고침
 - **에러 처리**:
-  - API 호출 실패 시 에러 메시지 표시
+  - API 호출 실패 시 커스텀 알림 모달로 에러 메시지 표시
   - Retry 버튼 제공
 
 #### 기능명: Cloud-Config 템플릿 관리
@@ -280,6 +289,8 @@ MachinesTab.vue (실시간 UI 업데이트)
   7. "Create" 또는 "Update" 버튼 클릭
   8. 템플릿 데이터 저장 (localStorage)
   9. 템플릿 목록 새로고침
+  10. 템플릿 삭제 시 커스텀 확인 모달 표시
+  11. 삭제 확인 후 템플릿 목록에서 제거 및 localStorage 업데이트
 - **태그 연계**:
   - 하나의 템플릿은 여러 태그와 연관 가능 (tags 배열)
   - Deploy 시 머신의 태그와 템플릿의 태그를 비교하여 매칭
@@ -289,7 +300,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 각 템플릿은 id, name, tags, description, cloudConfig, createdAt, updatedAt 필드 포함
 - **에러 처리**:
   - 필수 필드 검증 (Name, Cloud-Config YAML)
-  - localStorage 저장 실패 시 에러 로그
+  - localStorage 저장 실패 시 커스텀 알림 모달로 에러 메시지 표시
 
 ### 3.3 Machines Tab 기능
 
@@ -347,7 +358,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 재커미셔닝 확인 메시지
   - Release 확인 메시지
   - 일괄 작업 확인 메시지
-  - 삭제 확인 메시지
+  - 삭제 확인 메시지 (머신, 태그, 템플릿)
   - 에러 알림 메시지
 - **주요 코드 파일**:
   - `MachinesTab.vue`:
@@ -356,10 +367,16 @@ MachinesTab.vue (실시간 UI 업데이트)
     - `showConfirmModal`, `confirmModalTitle`, `confirmModalMessage`, `confirmModalButtonText`
     - `showAlertModal`, `alertModalTitle`, `alertModalMessage`
     - `confirmAction()`, `cancelConfirm()`, `closeAlert()`
+  - `ConfigurationTab.vue`:
+    - 동일한 `customConfirm()`, `customAlert()` 함수 사용
+    - 태그 삭제, 템플릿 삭제 시 확인 모달 사용
+    - 에러 메시지 표시 시 알림 모달 사용
 - **UI/UX 특징**:
-  - 모달 오버레이 클릭 시 닫힘 (Alert는 확인 버튼만)
+  - 모든 모달은 드래그 가능 (모달 헤더를 드래그하여 이동)
+  - 모달 바깥쪽 클릭 시 닫히지 않음 (확인/취소 버튼으로만 닫힘)
   - Teleport를 사용하여 body에 렌더링
   - 일관된 디자인 스타일
+  - 모달 헤더에 grab/grabbing 커서 표시
 
 #### 기능명: 상태별 머신 선택 (Status-based Machine Selection)
 - **설명**: 머신 테이블의 전체 선택 체크박스 옆에 드롭다운 메뉴를 제공하여, 머신 상태별로 일괄 선택/해제 기능을 제공합니다. 진행 중인 상태(Commissioning, Deploying, Disk Erasing 등)는 제외하고, 멈춰 있는 상태(New, Ready, Allocated, Deployed, Failed 등)만 선택 가능합니다.
@@ -1619,6 +1636,105 @@ public class MaasController {
     - `arches`: 지원하는 architecture 목록 (예: `["amd64"]`)
   - `count`: OS 목록 개수
 
+##### GET /api/tags
+- **설명**: MAAS 태그 목록 조회
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+```json
+{
+  "results": [
+    {
+      "name": "web",
+      "definition": "",
+      "comment": "Web server tag",
+      "kernel_opts": ""
+    }
+  ]
+}
+```
+- **MAAS API**: `GET /MAAS/api/2.0/tags/`
+- **주요 코드 파일**:
+  - `MaasController.getTags()`: API 엔드포인트
+  - `MaasApiService.getAllTags()`: MAAS API 호출
+
+##### POST /api/tags
+- **설명**: 새 태그 생성
+- **요청 파라미터**:
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+  - `name` (필수): 태그 이름
+  - `comment` (선택): 태그 설명
+  - `definition` (선택): 태그 정의
+  - `kernelOpts` (선택): 커널 옵션
+- **요청 형식**: Form Data (`application/x-www-form-urlencoded`)
+- **응답**:
+```json
+{
+  "success": true,
+  "data": {
+    "name": "web",
+    "comment": "Web server tag",
+    "definition": "",
+    "kernel_opts": ""
+  }
+}
+```
+- **MAAS API**: `POST /MAAS/api/2.0/tags/`
+- **주요 코드 파일**:
+  - `MaasController.createTag()`: API 엔드포인트
+  - `MaasApiService.createTag()`: MAAS API 호출
+
+##### PUT /api/tags/{oldName}
+- **설명**: 태그 수정
+- **요청 파라미터**:
+  - `oldName` (경로 변수): 기존 태그 이름
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+  - `name` (필수): 새 태그 이름
+  - `comment` (선택): 태그 설명
+  - `definition` (선택): 태그 정의
+  - `kernelOpts` (선택): 커널 옵션
+- **요청 형식**: Form Data (`application/x-www-form-urlencoded`)
+- **응답**:
+```json
+{
+  "success": true,
+  "data": {
+    "name": "web-server",
+    "comment": "Web server tag",
+    "definition": "",
+    "kernel_opts": ""
+  }
+}
+```
+- **MAAS API**: `PUT /MAAS/api/2.0/tags/{name}/`
+- **주요 코드 파일**:
+  - `MaasController.updateTag()`: API 엔드포인트
+  - `MaasApiService.updateTag()`: MAAS API 호출
+
+##### DELETE /api/tags/{name}
+- **설명**: 태그 삭제
+- **요청 파라미터**:
+  - `name` (경로 변수): 태그 이름
+  - `maasUrl` (필수): MAAS 서버 URL
+  - `apiKey` (필수): API 키
+- **응답**:
+  - 성공 시: HTTP 200 OK
+```json
+{
+  "success": true,
+  "message": "Tag deleted successfully"
+}
+```
+- **MAAS API**: `DELETE /MAAS/api/2.0/tags/{name}/`
+- **MAAS 응답**: HTTP 204 NO_CONTENT (본문 없음)
+- **백엔드 처리**: `toBodilessEntity()`를 사용하여 204 응답 처리
+- **주요 코드 파일**:
+  - `MaasController.deleteTag()`: API 엔드포인트
+  - `MaasApiService.deleteTag()`: MAAS API 호출
+
 ##### DELETE /api/machines/{systemId}
 - **설명**: 머신 삭제
 - **요청 파라미터**:
@@ -2257,11 +2373,15 @@ maas.default.api-key=consumer_key:token:token_secret
   - **Machine Details 모달**: 머신 상세 정보 표시 모달
   - **Confirm/Alert 모달**: 확인 및 알림 메시지 모달 (커스텀 모달)
   - **Network 설정 모달**: 네트워크 설정 변경 모달
+  - **Deploy 모달**: OS 선택 및 Cloud-Config 설정 모달
+  - **Tag Information 모달**: 태그 생성/수정/삭제 모달
+  - **Cloud-Config Template 모달**: 템플릿 생성/수정 모달
 - **동작 방식**:
   - 모달 헤더에서 마우스를 누르고 드래그하면 모달이 이동
   - 드래그 중 커서가 `grab` → `grabbing`으로 변경
   - 모달이 브라우저 뷰포트 경계를 벗어나지 않도록 제한
   - 모달 닫을 때 위치가 자동으로 초기화됨
+  - 모달 바깥쪽 클릭 시 모달이 닫히지 않음 (확인/취소 버튼으로만 닫힘)
 - **기술 구현**:
   - `mousedown` 이벤트로 드래그 시작
   - `mousemove` 이벤트로 실시간 위치 업데이트
@@ -2274,12 +2394,19 @@ maas.default.api-key=consumer_key:token:token_secret
   - 드래그 중 전환 효과 비활성화 (`transition: none`)
   - 직관적인 드래그 인터페이스
   - 각 모달은 독립적인 위치 상태 관리
+  - 모달 바깥쪽 클릭으로 실수로 닫히는 것을 방지
 - **주요 코드 파일**:
   - `MachinesTab.vue`:
     - `startDragModal()`, `onDragModal()`, `stopDragModal()`: Machine Details 모달 드래그
     - `startDragConfirmModal()`, `onDragConfirmModal()`, `stopDragConfirmModal()`: Confirm/Alert 모달 드래그
     - `startDragNetworkModal()`, `onDragNetworkModal()`, `stopDragNetworkModal()`: Network 모달 드래그
-    - 각 모달별 독립적인 위치 상태 (`modalPosition`, `confirmModalPosition`, `networkModalPosition`)
+    - `startDragDeployModal()`, `onDragDeployModal()`, `stopDragDeployModal()`: Deploy 모달 드래그
+    - 각 모달별 독립적인 위치 상태 (`modalPosition`, `confirmModalPosition`, `networkModalPosition`, `deployModalPosition`)
+  - `ConfigurationTab.vue`:
+    - `startDragTagModal()`, `onDragTagModal()`, `stopDragTagModal()`: Tag Information 모달 드래그
+    - `startDragTemplateModal()`, `onDragTemplateModal()`, `stopDragTemplateModal()`: Cloud-Config Template 모달 드래그
+    - `startDragConfirmModal()`, `onDragConfirmModal()`, `stopDragConfirmModal()`: Confirm/Alert 모달 드래그
+    - 각 모달별 독립적인 위치 상태 (`tagModalPosition`, `templateModalPosition`, `confirmModalPosition`)
 
 ### 5.4 CSS/스타일 프레임워크
 - **프레임워크**: 커스텀 CSS (프레임워크 미사용)

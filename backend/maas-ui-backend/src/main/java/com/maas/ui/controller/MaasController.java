@@ -637,6 +637,98 @@ public class MaasController {
     }
     
     /**
+     * 새 태그를 생성합니다.
+     */
+    @PostMapping("/tags")
+    public Mono<ResponseEntity<Map<String, Object>>> createTag(
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam String name,
+            @RequestParam(required = false, defaultValue = "") String comment,
+            @RequestParam(required = false, defaultValue = "") String definition,
+            @RequestParam(required = false, defaultValue = "") String kernelOpts) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.createTag(maasUrl, apiKey, name, comment, definition, kernelOpts)
+                .map(tag -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", true);
+                    response.put("data", tag);
+                    return ResponseEntity.ok(response);
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("success", false);
+                    errorResponse.put("error", "Failed to create tag: " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+                });
+    }
+    
+    /**
+     * 태그를 수정합니다.
+     */
+    @PutMapping("/tags/{oldName}")
+    public Mono<ResponseEntity<Map<String, Object>>> updateTag(
+            @PathVariable String oldName,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey,
+            @RequestParam String name,
+            @RequestParam(required = false, defaultValue = "") String comment,
+            @RequestParam(required = false, defaultValue = "") String definition) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.updateTag(maasUrl, apiKey, oldName, name, comment, definition)
+                .map(tag -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", true);
+                    response.put("data", tag);
+                    return ResponseEntity.ok(response);
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("success", false);
+                    errorResponse.put("error", "Failed to update tag: " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+                });
+    }
+    
+    /**
+     * 태그를 삭제합니다.
+     */
+    @DeleteMapping("/tags/{name}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteTag(
+            @PathVariable String name,
+            @RequestParam String maasUrl,
+            @RequestParam String apiKey) {
+        
+        if (!authService.isValidApiKey(apiKey)) {
+            return Mono.just(ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid API key format")));
+        }
+        
+        return maasApiService.deleteTag(maasUrl, apiKey, name)
+                .map(success -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", true);
+                    return ResponseEntity.ok(response);
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("success", false);
+                    errorResponse.put("error", "Failed to delete tag: " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+                });
+    }
+    
+    /**
      * 헬스 체크 엔드포인트
      */
     @GetMapping("/health")

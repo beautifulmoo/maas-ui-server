@@ -42,7 +42,12 @@
       </div>
       
       <div class="configuration-section">
-        <h3>Tags</h3>
+        <div class="section-header">
+          <h3>Tags</h3>
+          <button @click="openTagModal()" class="btn-primary btn-sm">
+            + Add Tag
+          </button>
+        </div>
         
         <div v-if="loadingTags" class="loading">
           <p>Loading tags...</p>
@@ -54,7 +59,7 @@
         </div>
         
         <div v-else-if="tags.length === 0" class="no-data">
-          <p>No tags found.</p>
+          <p>No tags found. Click "+ Add Tag" to create one.</p>
         </div>
         
         <div v-else class="tags-list">
@@ -68,7 +73,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="tag in tags" :key="tag.name">
+              <tr v-for="tag in tags" :key="tag.name" @click="openTagModal(tag)" class="tag-row">
                 <td><span class="tag-badge">{{ tag.name }}</span></td>
                 <td>{{ tag.definition || '-' }}</td>
                 <td>{{ tag.comment || '-' }}</td>
@@ -125,9 +130,17 @@
     </div>
     
     <!-- Cloud-Config Template Modal -->
-    <div v-if="showTemplateModal" class="modal-overlay" @click="closeTemplateModal">
-      <div class="modal-content template-modal-content" @click.stop>
-        <div class="modal-header">
+    <div v-if="showTemplateModal" class="modal-overlay">
+      <div 
+        class="modal-content template-modal-content" 
+        :style="(templateModalPosition?.top || templateModalPosition?.left) ? { position: 'fixed', top: (templateModalPosition?.top || 0) + 'px', left: (templateModalPosition?.left || 0) + 'px', margin: 0 } : {}"
+        @click.stop
+      >
+        <div 
+          class="modal-header modal-draggable-header"
+          @mousedown="startDragTemplateModal"
+          :style="isDraggingTemplateModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
           <h3>{{ editingTemplate ? 'Edit Template' : 'New Template' }}</h3>
           <button class="close-btn" @click="closeTemplateModal">&times;</button>
         </div>
@@ -202,11 +215,139 @@
         </div>
       </div>
     </div>
+    
+    <!-- Add Tag Modal -->
+    <div v-if="showTagModal" class="modal-overlay">
+      <div 
+        class="modal-content tag-modal-content" 
+        :style="(tagModalPosition?.top || tagModalPosition?.left) ? { position: 'fixed', top: (tagModalPosition?.top || 0) + 'px', left: (tagModalPosition?.left || 0) + 'px', margin: 0 } : {}"
+        @click.stop
+      >
+        <div 
+          class="modal-header modal-draggable-header"
+          @mousedown="startDragTagModal"
+          :style="isDraggingTagModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
+          <h3>Tag Information</h3>
+          <button class="close-btn" @click="closeTagModal">&times;</button>
+        </div>
+        
+        <div class="modal-body">
+          <div class="form-section">
+            <label class="form-label">Name *</label>
+            <input 
+              v-model="tagForm.name" 
+              type="text" 
+              class="form-input"
+              placeholder="e.g., web, db, k8s-node"
+            />
+          </div>
+          
+          <div class="form-section">
+            <label class="form-label">Comment</label>
+            <textarea 
+              v-model="tagForm.comment" 
+              class="form-textarea"
+              rows="3"
+              placeholder="Tag description"
+            ></textarea>
+          </div>
+          
+          <div class="form-section">
+            <label class="form-label">Kernel Options</label>
+            <input 
+              v-model="tagForm.kernelOpts" 
+              type="text" 
+              class="form-input"
+              disabled
+              placeholder="Disabled for now"
+            />
+          </div>
+          
+          <div class="form-section">
+            <label class="form-label">Definition</label>
+            <input 
+              v-model="tagForm.definition" 
+              type="text" 
+              class="form-input"
+              disabled
+              placeholder="Disabled for now"
+            />
+          </div>
+        </div>
+        
+        <div class="modal-footer">
+          <button 
+            v-if="editingTag" 
+            @click="deleteTag" 
+            class="btn-delete btn-sm" 
+            :disabled="creatingTag"
+          >
+            <span v-if="creatingTag">Deleting...</span>
+            <span v-else>Delete</span>
+          </button>
+          <button @click="closeTagModal" class="btn-secondary btn-sm" :disabled="creatingTag">Cancel</button>
+          <button @click="saveTag" class="btn-primary btn-sm" :disabled="!isTagFormValid || creatingTag">
+            <span v-if="creatingTag">{{ editingTag ? 'Updating...' : 'Creating...' }}</span>
+            <span v-else>{{ editingTag ? 'Update' : 'Create' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Confirmation Modal -->
+    <Teleport to="body">
+      <div v-if="showConfirmModal" class="modal-overlay">
+        <div 
+          class="modal-content confirm-modal-content"
+          :style="confirmModalPosition?.top || confirmModalPosition?.left ? { position: 'fixed', top: confirmModalPosition.top + 'px', left: confirmModalPosition.left + 'px', margin: 0 } : {}"
+        >
+          <div 
+            class="modal-header modal-draggable-header"
+            @mousedown="startDragConfirmModal"
+            :style="isDraggingConfirmModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          >
+            <h3>{{ confirmModalTitle }}</h3>
+          </div>
+          <div class="modal-body confirm-modal-body">
+            <p class="confirm-message">{{ confirmModalMessage }}</p>
+          </div>
+          <div class="modal-footer confirm-modal-footer">
+            <button class="btn-secondary" @click="cancelConfirm">취소</button>
+            <button class="btn-primary" @click="confirmAction">{{ confirmModalButtonText }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+    
+    <!-- Alert Modal -->
+    <Teleport to="body">
+      <div v-if="showAlertModal" class="modal-overlay">
+        <div 
+          class="modal-content alert-modal-content"
+          :style="confirmModalPosition?.top || confirmModalPosition?.left ? { position: 'fixed', top: confirmModalPosition.top + 'px', left: confirmModalPosition.left + 'px', margin: 0 } : {}"
+        >
+          <div 
+            class="modal-header modal-draggable-header"
+            @mousedown="startDragConfirmModal"
+            :style="isDraggingConfirmModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          >
+            <h3>{{ alertModalTitle }}</h3>
+          </div>
+          <div class="modal-body alert-modal-body">
+            <p class="alert-message">{{ alertModalMessage }}</p>
+          </div>
+          <div class="modal-footer alert-modal-footer">
+            <button class="btn-primary" @click="closeAlert">확인</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
 import { useSettings } from '../composables/useSettings'
 
@@ -224,6 +365,15 @@ export default {
     const tags = ref([])
     const loadingTags = ref(false)
     const tagsError = ref(null)
+    const showTagModal = ref(false)
+    const creatingTag = ref(false)
+    const editingTag = ref(null)
+    const tagForm = ref({
+      name: '',
+      comment: '',
+      kernelOpts: '',
+      definition: ''
+    })
     
     // Cloud-Config Templates
     const cloudConfigTemplates = ref([])
@@ -235,6 +385,30 @@ export default {
       description: '',
       cloudConfig: ''
     })
+    const isDraggingTemplateModal = ref(false)
+    const templateModalPosition = ref({ top: 0, left: 0 })
+    const templateDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Tag Modal drag
+    const isDraggingTagModal = ref(false)
+    const tagModalPosition = ref({ top: 0, left: 0 })
+    const tagDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Confirmation Modal
+    const showConfirmModal = ref(false)
+    const confirmModalTitle = ref('확인')
+    const confirmModalMessage = ref('')
+    const confirmModalButtonText = ref('확인')
+    const confirmModalResolve = ref(null)
+    const isDraggingConfirmModal = ref(false)
+    const confirmModalPosition = ref({ top: 0, left: 0 })
+    const confirmDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Alert Modal
+    const showAlertModal = ref(false)
+    const alertModalTitle = ref('알림')
+    const alertModalMessage = ref('')
+    const alertModalResolve = ref(null)
     
     const formatOS = (os) => {
       if (!os) return '-'
@@ -345,18 +519,9 @@ export default {
           cloudConfig: ''
         }
       }
+      // Reset modal position when opening
+      templateModalPosition.value = { top: 0, left: 0 }
       showTemplateModal.value = true
-    }
-    
-    const closeTemplateModal = () => {
-      showTemplateModal.value = false
-      editingTemplate.value = null
-      templateForm.value = {
-        name: '',
-        selectedTags: [],
-        description: '',
-        cloudConfig: ''
-      }
     }
     
     const isTemplateFormValid = computed(() => {
@@ -397,8 +562,12 @@ export default {
       closeTemplateModal()
     }
     
-    const deleteTemplate = (templateId) => {
-      if (confirm('Are you sure you want to delete this template?')) {
+    const deleteTemplate = async (templateId) => {
+      const template = cloudConfigTemplates.value.find(t => t.id === templateId)
+      const templateName = template ? template.name : 'this template'
+      const confirmMessage = `템플릿 "${templateName}"을(를) 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+      const confirmed = await customConfirm(confirmMessage, '삭제 확인', '삭제')
+      if (confirmed) {
         cloudConfigTemplates.value = cloudConfigTemplates.value.filter(t => t.id !== templateId)
         saveCloudConfigTemplates()
       }
@@ -436,6 +605,406 @@ export default {
       }
     }
     
+    const openTagModal = (tag) => {
+      if (tag) {
+        editingTag.value = tag
+        tagForm.value = {
+          name: tag.name || '',
+          comment: tag.comment || '',
+          kernelOpts: tag.kernel_opts || '',
+          definition: tag.definition || ''
+        }
+      } else {
+        editingTag.value = null
+        tagForm.value = {
+          name: '',
+          comment: '',
+          kernelOpts: '',
+          definition: ''
+        }
+      }
+      // Reset modal position when opening
+      tagModalPosition.value = { top: 0, left: 0 }
+      showTagModal.value = true
+    }
+    
+    const closeTagModal = () => {
+      showTagModal.value = false
+      editingTag.value = null
+      tagForm.value = {
+        name: '',
+        comment: '',
+        kernelOpts: '',
+        definition: ''
+      }
+      // Reset modal position
+      tagModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    const closeTemplateModal = () => {
+      showTemplateModal.value = false
+      editingTemplate.value = null
+      templateForm.value = {
+        name: '',
+        selectedTags: [],
+        description: '',
+        cloudConfig: ''
+      }
+      // Reset modal position
+      templateModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    const isTagFormValid = computed(() => {
+      return tagForm.value.name && tagForm.value.name.trim().length > 0
+    })
+    
+    // 커스텀 confirm 함수
+    const customConfirm = (message, title = '확인', buttonText = '확인') => {
+      return new Promise((resolve) => {
+        confirmModalTitle.value = title
+        confirmModalMessage.value = message
+        confirmModalButtonText.value = buttonText
+        confirmModalResolve.value = resolve
+        showConfirmModal.value = true
+      })
+    }
+    
+    // 커스텀 alert 함수
+    const customAlert = (message, title = '알림') => {
+      return new Promise((resolve) => {
+        alertModalTitle.value = title
+        alertModalMessage.value = message
+        alertModalResolve.value = resolve
+        showAlertModal.value = true
+      })
+    }
+    
+    // 확인 모달 확인 버튼
+    const confirmAction = () => {
+      showConfirmModal.value = false
+      if (confirmModalResolve.value) {
+        confirmModalResolve.value(true)
+        confirmModalResolve.value = null
+      }
+      // Reset modal position when closing
+      confirmModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    // 확인 모달 취소 버튼
+    const cancelConfirm = () => {
+      showConfirmModal.value = false
+      if (confirmModalResolve.value) {
+        confirmModalResolve.value(false)
+        confirmModalResolve.value = null
+      }
+      // Reset modal position when closing
+      confirmModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    // 알림 모달 닫기
+    const closeAlert = () => {
+      showAlertModal.value = false
+      if (alertModalResolve.value) {
+        alertModalResolve.value()
+        alertModalResolve.value = null
+      }
+      // Reset modal position when closing
+      confirmModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    // Confirm Modal drag handlers
+    const startDragConfirmModal = (event) => {
+      if (event.button !== 0) return
+      isDraggingConfirmModal.value = true
+      const modalElement = event.currentTarget.closest('.confirm-modal-content, .alert-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        confirmDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        if (!confirmModalPosition.value.top && !confirmModalPosition.value.left) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          confirmModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragConfirmModal = (event) => {
+      if (!isDraggingConfirmModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.confirm-modal-content, .alert-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - confirmDragStartPosition.value.x
+      let newTop = event.clientY - confirmDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      confirmModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragConfirmModal = () => {
+      isDraggingConfirmModal.value = false
+    }
+    
+    watch(isDraggingConfirmModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragConfirmModal)
+        document.addEventListener('mouseup', stopDragConfirmModal)
+      } else {
+        document.removeEventListener('mousemove', onDragConfirmModal)
+        document.removeEventListener('mouseup', stopDragConfirmModal)
+      }
+    })
+    
+    const saveTag = async () => {
+      if (!isTagFormValid.value || creatingTag.value) {
+        return
+      }
+      
+      creatingTag.value = true
+      
+      try {
+        const settings = settingsStore.settings
+        if (!settings.maasUrl || !settings.apiKey) {
+          await customAlert('MAAS URL and API Key are required', '오류')
+          creatingTag.value = false
+          return
+        }
+        
+        const formData = new URLSearchParams()
+        formData.append('name', tagForm.value.name.trim())
+        formData.append('comment', tagForm.value.comment || '')
+        formData.append('definition', tagForm.value.definition || '')
+        
+        let response
+        if (editingTag.value) {
+          // Update existing tag
+          const oldName = editingTag.value.name
+          response = await axios.put(`http://localhost:8081/api/tags/${encodeURIComponent(oldName)}`, formData, {
+            params: {
+              maasUrl: settings.maasUrl,
+              apiKey: settings.apiKey
+            },
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            }
+          })
+        } else {
+          // Create new tag
+          formData.append('kernelOpts', tagForm.value.kernelOpts || '')
+          response = await axios.post('http://localhost:8081/api/tags', formData, {
+            params: {
+              maasUrl: settings.maasUrl,
+              apiKey: settings.apiKey
+            },
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            }
+          })
+        }
+        
+        if (response.data.success) {
+          closeTagModal()
+          // Reload tags list
+          await loadTags()
+        } else {
+          await customAlert((editingTag.value ? '태그 수정 실패: ' : '태그 생성 실패: ') + (response.data.error || 'Unknown error'), '오류')
+        }
+      } catch (err) {
+        console.error('Error saving tag:', err)
+        await customAlert((editingTag.value ? '태그 수정 실패: ' : '태그 생성 실패: ') + (err.response?.data?.error || err.message || 'Unknown error'), '오류')
+      } finally {
+        creatingTag.value = false
+      }
+    }
+    
+    const deleteTag = async () => {
+      if (!editingTag.value || creatingTag.value) {
+        return
+      }
+      
+      const confirmMessage = `태그 "${editingTag.value.name}"을(를) 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+      const confirmed = await customConfirm(confirmMessage, '삭제 확인', '삭제')
+      if (!confirmed) {
+        return
+      }
+      
+      creatingTag.value = true
+      
+      try {
+        const settings = settingsStore.settings
+        if (!settings.maasUrl || !settings.apiKey) {
+          await customAlert('MAAS URL and API Key are required', '오류')
+          creatingTag.value = false
+          return
+        }
+        
+        const response = await axios.delete(`http://localhost:8081/api/tags/${encodeURIComponent(editingTag.value.name)}`, {
+          params: {
+            maasUrl: settings.maasUrl,
+            apiKey: settings.apiKey
+          }
+        })
+        
+        if (response.data.success) {
+          closeTagModal()
+          // Reload tags list
+          await loadTags()
+        } else {
+          await customAlert('태그 삭제 실패: ' + (response.data.error || 'Unknown error'), '오류')
+        }
+      } catch (err) {
+        console.error('Error deleting tag:', err)
+        await customAlert('태그 삭제 실패: ' + (err.response?.data?.error || err.message || 'Unknown error'), '오류')
+      } finally {
+        creatingTag.value = false
+      }
+    }
+    
+    // Template Modal drag handlers
+    const startDragTemplateModal = (event) => {
+      if (event.button !== 0) return // Only left mouse button
+      isDraggingTemplateModal.value = true
+      const modalElement = event.currentTarget.closest('.template-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        templateDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        // If modal hasn't been moved yet, center it
+        if (!templateModalPosition.value.top && !templateModalPosition.value.left) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          templateModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragTemplateModal = (event) => {
+      if (!isDraggingTemplateModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.template-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - templateDragStartPosition.value.x
+      let newTop = event.clientY - templateDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      templateModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragTemplateModal = () => {
+      isDraggingTemplateModal.value = false
+    }
+    
+    // Tag Modal drag handlers
+    const startDragTagModal = (event) => {
+      if (event.button !== 0) return
+      isDraggingTagModal.value = true
+      const modalElement = event.currentTarget.closest('.tag-modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        tagDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        if (!tagModalPosition.value.top && !tagModalPosition.value.left) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          tagModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragTagModal = (event) => {
+      if (!isDraggingTagModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.tag-modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - tagDragStartPosition.value.x
+      let newTop = event.clientY - tagDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      tagModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragTagModal = () => {
+      isDraggingTagModal.value = false
+    }
+    
+    // Add global mousemove and mouseup listeners when dragging
+    watch(isDraggingTemplateModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragTemplateModal)
+        document.addEventListener('mouseup', stopDragTemplateModal)
+      } else {
+        document.removeEventListener('mousemove', onDragTemplateModal)
+        document.removeEventListener('mouseup', stopDragTemplateModal)
+      }
+    })
+    
+    watch(isDraggingTagModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragTagModal)
+        document.addEventListener('mouseup', stopDragTagModal)
+      } else {
+        document.removeEventListener('mousemove', onDragTagModal)
+        document.removeEventListener('mouseup', stopDragTagModal)
+      }
+    })
+    
     onMounted(() => {
       loadDeployableOS()
       loadCloudConfigTemplates()
@@ -455,6 +1024,18 @@ export default {
       loadingTags,
       tagsError,
       loadTags,
+      showTagModal,
+      creatingTag,
+      editingTag,
+      tagForm,
+      isTagFormValid,
+      openTagModal,
+      closeTagModal,
+      saveTag,
+      deleteTag,
+      isDraggingTagModal,
+      tagModalPosition,
+      startDragTagModal,
       // Cloud-Config Templates
       cloudConfigTemplates,
       showTemplateModal,
@@ -464,7 +1045,24 @@ export default {
       openTemplateModal,
       closeTemplateModal,
       saveTemplate,
-      deleteTemplate
+      deleteTemplate,
+      isDraggingTemplateModal,
+      templateModalPosition,
+      startDragTemplateModal,
+      // Confirmation & Alert Modals
+      showConfirmModal,
+      showAlertModal,
+      confirmModalTitle,
+      confirmModalMessage,
+      confirmModalButtonText,
+      confirmAction,
+      cancelConfirm,
+      closeAlert,
+      customConfirm,
+      customAlert,
+      isDraggingConfirmModal,
+      confirmModalPosition,
+      startDragConfirmModal
     }
   }
 }
@@ -776,6 +1374,10 @@ export default {
   max-width: 800px;
 }
 
+.tag-modal-content {
+  max-width: 600px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -919,6 +1521,55 @@ export default {
   color: #6c757d;
   font-style: italic;
   margin-left: 0.25rem;
+}
+
+.tag-row {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.tag-row:hover {
+  background-color: #f8f9fa;
+}
+
+.modal-draggable-header {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.modal-draggable-header:active {
+  cursor: grabbing !important;
+}
+
+/* Confirm & Alert Modal Styles */
+.confirm-modal-content,
+.alert-modal-content {
+  max-width: 500px;
+  width: 90%;
+}
+
+.confirm-modal-body,
+.alert-modal-body {
+  padding: 1.5rem;
+}
+
+.confirm-message,
+.alert-message {
+  margin: 0;
+  white-space: pre-line;
+  line-height: 1.6;
+  color: #495057;
+}
+
+.confirm-modal-footer,
+.alert-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e9ecef;
 }
 </style>
 
