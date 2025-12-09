@@ -385,14 +385,15 @@ public class MaasController {
             @RequestParam String apiKey,
             @RequestParam(required = false) String os,
             @RequestParam(required = false) String release,
-            @RequestParam(required = false) String arch) {
+            @RequestParam(required = false) String arch,
+            @RequestParam(required = false) String userdata) {
         
         if (!authService.isValidApiKey(apiKey)) {
             return Mono.just(ResponseEntity.badRequest()
                     .body(Map.of("error", "Invalid API key format")));
         }
         
-        return maasApiService.deployMachine(maasUrl, apiKey, systemId, os, release, arch)
+        return maasApiService.deployMachine(maasUrl, apiKey, systemId, os, release, arch, userdata)
                 .map(ResponseEntity::ok)
                 .onErrorReturn(ResponseEntity.status(500)
                         .body(Map.of("error", "Failed to deploy machine")));

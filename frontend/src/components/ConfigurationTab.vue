@@ -27,15 +27,21 @@
                 <th>Release</th>
                 <th>Version</th>
                 <th>Architecture</th>
+                <th>Deployed Machines</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(os, index) in deployableOS" :key="index">
-                <td>{{ formatOS(os.os) }}</td>
-                <td>{{ os.release }}</td>
-                <td>{{ formatVersion(os.os, os.release) }}</td>
-                <td>{{ formatArchitectures(os.arches) }}</td>
-              </tr>
+              <template v-for="(osGroup, osName) in groupedOS" :key="osName">
+                <tr v-for="(os, index) in osGroup" :key="`${osName}-${index}`">
+                  <td v-if="index === 0" :rowspan="osGroup.length" class="os-name-cell">
+                    {{ formatOS(os.os) }}
+                  </td>
+                  <td>{{ os.release }}</td>
+                  <td>{{ formatVersion(os.os, os.release) }}</td>
+                  <td>{{ formatArchitectures(os.arches) }}</td>
+                  <td>{{ getDeployedMachineCount(os.os, os.release) }}</td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -103,11 +109,10 @@
                 <th>Name</th>
                 <th>Tags</th>
                 <th>Description</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="template in cloudConfigTemplates" :key="template.id">
+              <tr v-for="template in cloudConfigTemplates" :key="template.id" @click="openTemplateModal(template)" class="template-row">
                 <td>{{ template.name }}</td>
                 <td>
                   <div class="tags-container" v-if="template.tags && template.tags.length > 0">
@@ -116,12 +121,6 @@
                   <span v-else class="no-tag">-</span>
                 </td>
                 <td>{{ template.description || '-' }}</td>
-                <td>
-                  <div class="action-buttons">
-                    <button @click="openTemplateModal(template)" class="btn-edit btn-sm">Edit</button>
-                    <button @click="deleteTemplate(template.id)" class="btn-delete btn-sm">Delete</button>
-                  </div>
-                </td>
               </tr>
             </tbody>
           </table>
@@ -141,7 +140,7 @@
           @mousedown="startDragTemplateModal"
           :style="isDraggingTemplateModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
-          <h3>{{ editingTemplate ? 'Edit Template' : 'New Template' }}</h3>
+          <h3>{{ editingTemplate ? 'Template Information' : 'New Template' }}</h3>
           <button class="close-btn" @click="closeTemplateModal">&times;</button>
         </div>
         
@@ -208,8 +207,16 @@
         </div>
         
         <div class="modal-footer">
+          <button 
+            v-if="editingTemplate" 
+            @click="deleteTemplate(editingTemplate.id)" 
+            class="btn-delete btn-sm" 
+            :disabled="!editingTemplate"
+          >
+            Delete
+          </button>
           <button @click="closeTemplateModal" class="btn-secondary btn-sm">Cancel</button>
-          <button @click="saveTemplate" class="btn-primary btn-sm" :disabled="!isTemplateFormValid">
+          <button @click="saveTemplate" class="btn-primary btn-sm" :disabled="!isTemplateFormChanged">
             {{ editingTemplate ? 'Update' : 'Create' }}
           </button>
         </div>
@@ -287,7 +294,7 @@
             <span v-else>Delete</span>
           </button>
           <button @click="closeTagModal" class="btn-secondary btn-sm" :disabled="creatingTag">Cancel</button>
-          <button @click="saveTag" class="btn-primary btn-sm" :disabled="!isTagFormValid || creatingTag">
+          <button @click="saveTag" class="btn-primary btn-sm" :disabled="!isTagFormChanged || creatingTag">
             <span v-if="creatingTag">{{ editingTag ? 'Updating...' : 'Creating...' }}</span>
             <span v-else>{{ editingTag ? 'Update' : 'Create' }}</span>
           </button>
@@ -360,6 +367,8 @@ export default {
     const deployableOS = ref([])
     const loading = ref(false)
     const error = ref(null)
+    const machines = ref([])
+    const loadingMachines = ref(false)
     
     // Tags
     const tags = ref([])
@@ -439,6 +448,100 @@ export default {
         return '-'
       }
       return arches.join(', ')
+    }
+    
+    // OS별로 그룹화된 데이터 생성
+    const groupedOS = computed(() => {
+      const groups = {}
+      
+      deployableOS.value.forEach(os => {
+        const osKey = os.os.toLowerCase()
+        if (!groups[osKey]) {
+          groups[osKey] = []
+        }
+        groups[osKey].push(os)
+      })
+      
+      // 각 OS 그룹 내에서 release로 정렬 (최신순)
+      Object.keys(groups).forEach(osKey => {
+        groups[osKey].sort((a, b) => {
+          // release 이름으로 정렬 (간단한 문자열 비교)
+          return b.release.localeCompare(a.release)
+        })
+      })
+      
+      return groups
+    })
+    
+    const loadMachines = async () => {
+      loadingMachines.value = true
+      
+      try {
+        const settings = settingsStore.settings
+        if (!settings.maasUrl || !settings.apiKey) {
+          loadingMachines.value = false
+          return
+        }
+        
+        const response = await axios.get('http://localhost:8081/api/machines', {
+          params: {
+            maasUrl: settings.maasUrl,
+            apiKey: settings.apiKey
+          }
+        })
+        
+        if (response.data && response.data.results) {
+          machines.value = response.data.results
+        } else {
+          machines.value = []
+        }
+      } catch (err) {
+        console.error('Error loading machines:', err)
+        machines.value = []
+      } finally {
+        loadingMachines.value = false
+      }
+    }
+    
+    const getDeployedMachineCount = (os, release) => {
+      if (!machines.value || machines.value.length === 0) {
+        return 0
+      }
+      
+      return machines.value.filter(machine => {
+        // Deployed 상태인 머신만 카운트
+        const isDeployed = machine.status_name === 'Deployed' || machine.status === 6
+        
+        if (!isDeployed) {
+          return false
+        }
+        
+        // OS와 Release 매칭
+        const machineOS = machine.osystem
+        const machineDistroSeries = machine.distro_series
+        
+        if (!machineOS || !machineDistroSeries) {
+          return false
+        }
+        
+        // distro_series 형식: "ubuntu/noble" 또는 "noble"
+        // os와 release를 매칭
+        const osMatch = machineOS.toLowerCase() === os.toLowerCase()
+        
+        // distro_series가 "os/release" 형식인지 확인
+        let releaseMatch = false
+        if (machineDistroSeries.includes('/')) {
+          const parts = machineDistroSeries.split('/')
+          if (parts.length === 2) {
+            releaseMatch = parts[1].toLowerCase() === release.toLowerCase()
+          }
+        } else {
+          // distro_series가 release만 있는 경우
+          releaseMatch = machineDistroSeries.toLowerCase() === release.toLowerCase()
+        }
+        
+        return osMatch && releaseMatch
+      }).length
     }
     
     const loadDeployableOS = async () => {
@@ -529,6 +632,27 @@ export default {
              templateForm.value.cloudConfig.trim() !== ''
     })
     
+    // Template 폼이 실제로 변경되었는지 확인
+    const isTemplateFormChanged = computed(() => {
+      if (!editingTemplate.value) {
+        // 새로 생성하는 경우는 항상 활성화 (유효성 검사만)
+        return isTemplateFormValid.value
+      }
+      
+      // 편집 모드: 원본 데이터와 비교
+      const original = editingTemplate.value
+      const current = templateForm.value
+      
+      // Tags 배열 비교 (순서 무관)
+      const originalTags = (original.tags || []).sort().join(',')
+      const currentTags = (current.selectedTags || []).sort().join(',')
+      
+      return original.name !== current.name.trim() ||
+             (original.description || '') !== (current.description || '') ||
+             originalTags !== currentTags ||
+             (original.cloudConfig || '') !== (current.cloudConfig || '')
+    })
+    
     const saveTemplate = () => {
       if (!isTemplateFormValid.value) {
         return
@@ -570,6 +694,10 @@ export default {
       if (confirmed) {
         cloudConfigTemplates.value = cloudConfigTemplates.value.filter(t => t.id !== templateId)
         saveCloudConfigTemplates()
+        // If the deleted template was being edited, close the modal
+        if (editingTemplate.value && editingTemplate.value.id === templateId) {
+          closeTemplateModal()
+        }
       }
     }
     
@@ -656,6 +784,23 @@ export default {
     
     const isTagFormValid = computed(() => {
       return tagForm.value.name && tagForm.value.name.trim().length > 0
+    })
+    
+    // Tag 폼이 실제로 변경되었는지 확인
+    const isTagFormChanged = computed(() => {
+      if (!editingTag.value) {
+        // 새로 생성하는 경우는 항상 활성화 (유효성 검사만)
+        return isTagFormValid.value
+      }
+      
+      // 편집 모드: 원본 데이터와 비교
+      const original = editingTag.value
+      const current = tagForm.value
+      
+      return original.name !== current.name.trim() ||
+             (original.comment || '') !== (current.comment || '') ||
+             (original.kernel_opts || '') !== (current.kernelOpts || '') ||
+             (original.definition || '') !== (current.definition || '')
     })
     
     // 커스텀 confirm 함수
@@ -1009,6 +1154,7 @@ export default {
       loadDeployableOS()
       loadCloudConfigTemplates()
       loadTags()
+      loadMachines()
     })
     
     return {
@@ -1019,6 +1165,8 @@ export default {
       formatVersion,
       formatArchitectures,
       loadDeployableOS,
+      getDeployedMachineCount,
+      groupedOS,
       // Tags
       tags,
       loadingTags,
@@ -1033,6 +1181,7 @@ export default {
       closeTagModal,
       saveTag,
       deleteTag,
+      isTagFormChanged,
       isDraggingTagModal,
       tagModalPosition,
       startDragTagModal,
@@ -1046,6 +1195,7 @@ export default {
       closeTemplateModal,
       saveTemplate,
       deleteTemplate,
+      isTemplateFormChanged,
       isDraggingTemplateModal,
       templateModalPosition,
       startDragTemplateModal,
@@ -1150,6 +1300,13 @@ export default {
 .os-table td {
   padding: 0.75rem 1rem;
   color: #495057;
+}
+
+.os-name-cell {
+  vertical-align: top;
+  font-weight: 600;
+  background-color: #f8f9fa;
+  border-right: 2px solid #dee2e6;
 }
 
 .tags-list {
@@ -1529,6 +1686,15 @@ export default {
 }
 
 .tag-row:hover {
+  background-color: #f8f9fa;
+}
+
+.template-row {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.template-row:hover {
   background-color: #f8f9fa;
 }
 

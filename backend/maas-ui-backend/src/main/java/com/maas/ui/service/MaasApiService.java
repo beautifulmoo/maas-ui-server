@@ -465,10 +465,11 @@ public class MaasApiService {
      * @param os OS 이름 (선택)
      * @param release OS release (선택)
      * @param arch Architecture (선택)
+     * @param userdata Base64 인코딩된 Cloud-Config YAML (선택)
      * @return 배포 결과
      */
     public Mono<Map<String, Object>> deployMachine(String maasUrl, String apiKey, String systemId, 
-            String os, String release, String arch) {
+            String os, String release, String arch, String userdata) {
         String authHeader = authService.generateAuthHeader(apiKey);
         String url = maasUrl + "/MAAS/api/2.0/machines/" + systemId + "/op-deploy";
         
@@ -476,6 +477,9 @@ public class MaasApiService {
         System.out.println("Deploy Machine - systemId: " + systemId);
         if (os != null) {
             System.out.println("Deploy Machine - OS: " + os + ", Release: " + release + ", Arch: " + arch);
+        }
+        if (userdata != null && !userdata.trim().isEmpty()) {
+            System.out.println("Deploy Machine - userdata: " + (userdata.length() > 100 ? userdata.substring(0, 100) + "..." : userdata));
         }
         
         // Form data 생성
@@ -490,6 +494,12 @@ public class MaasApiService {
         
         if (arch != null && !arch.trim().isEmpty()) {
             formData.add("architecture", arch.trim());
+        }
+        
+        // userdata 추가 (base64 인코딩된 Cloud-Config YAML)
+        if (userdata != null && !userdata.trim().isEmpty()) {
+            formData.add("user_data", userdata.trim());
+            System.out.println("Deploy Machine - user_data added (base64 encoded)");
         }
         
         return webClient.post()

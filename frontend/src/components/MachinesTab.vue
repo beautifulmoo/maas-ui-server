@@ -2328,10 +2328,7 @@ export default {
         if (response.data && response.data.success) {
           console.log(`Machine ${action === 'on' ? 'powered on' : 'powered off'} successfully:`, response.data)
           // Power state will be updated via WebSocket
-          // Optionally refresh machine list after a short delay
-          setTimeout(() => {
-            loadMachines()
-          }, 2000)
+          // No need to reload - WebSocket will update the state automatically
         } else {
           error.value = response.data?.error || `Failed to power ${action} machine`
           console.error(`Failed to power ${action}:`, response.data)
@@ -4471,6 +4468,26 @@ export default {
           selectedDeployOS.value = deployableOSList.value[0]
         }
       }
+      
+      // 머신 태그와 매칭되는 템플릿이 정확히 1개라면 자동 선택
+      // 템플릿이 로드된 후에 실행되도록 nextTick 사용
+      await new Promise(resolve => setTimeout(resolve, 0))
+      if (machine.tags && Array.isArray(machine.tags) && machine.tags.length > 0) {
+        const machineTags = machine.tags
+        const matchingTemplates = cloudConfigTemplates.value.filter(template => {
+          if (!template.tags || !Array.isArray(template.tags) || template.tags.length === 0) {
+            return false
+          }
+          // 템플릿의 태그 중 하나라도 머신 태그와 일치하는지 확인
+          return template.tags.some(tag => machineTags.includes(tag))
+        })
+        
+        // 매칭되는 템플릿이 정확히 1개라면 자동 선택
+        if (matchingTemplates.length === 1) {
+          selectedCloudConfigTemplate.value = matchingTemplates[0].id
+          console.log('Auto-selected template:', matchingTemplates[0].name, 'for machine tags:', machineTags)
+        }
+      }
     }
     
     const closeDeployModal = () => {
@@ -4487,15 +4504,26 @@ export default {
         return
       }
       
+      // Cloud-Config YAML 가져오기
+      let cloudConfigYaml = null
+      if (selectedCloudConfigTemplate.value === 'custom' && customCloudConfig.value) {
+        cloudConfigYaml = customCloudConfig.value
+      } else if (selectedCloudConfigTemplate.value !== 'none' && selectedCloudConfigTemplate.value !== 'custom') {
+        const template = cloudConfigTemplates.value.find(t => t.id === selectedCloudConfigTemplate.value)
+        if (template && template.cloudConfig) {
+          cloudConfigYaml = template.cloudConfig
+        }
+      }
+      
       deployingMachine.value = true
       try {
-        await deployMachine(selectedDeployMachine.value, selectedDeployOS.value)
+        await deployMachine(selectedDeployMachine.value, selectedDeployOS.value, cloudConfigYaml)
         // 배포 시작 성공 시 모달 닫기
-        closeDeployModal()
+        deployingMachine.value = false
+        closeDeployModal(true) // 강제로 닫기
       } catch (err) {
         console.error('Error starting deploy from modal:', err)
         // 에러 발생 시 모달은 열어두고 에러 메시지 표시
-      } finally {
         deployingMachine.value = false
       }
     }
@@ -4912,10 +4940,8 @@ export default {
         console.log(`All ${selected.length} machines powered ${action} successfully`)
       }
       
-      // 2초 후 머신 목록 새로고침
-      setTimeout(() => {
-        loadMachines()
-      }, 2000)
+      // Power state will be updated via WebSocket
+      // No need to reload - WebSocket will update the state automatically
     }
     
     // 일괄 작업 핸들러
@@ -5073,7 +5099,7 @@ export default {
     }
     
     // Deploy Machine
-    const deployMachine = async (machine, os = null) => {
+    const deployMachine = async (machine, os = null, cloudConfigYaml = null) => {
       if (machine.status !== 'ready' && machine.status !== 'allocated') {
         return
       }
@@ -5112,6 +5138,13 @@ export default {
           if (os.arches && os.arches.length > 0) {
             params.arch = os.arches[0] // 첫 번째 architecture 사용
           }
+        }
+        
+        // Cloud-Config YAML이 있으면 base64 인코딩하여 추가
+        if (cloudConfigYaml && cloudConfigYaml.trim()) {
+          // Base64 인코딩
+          const base64Encoded = btoa(unescape(encodeURIComponent(cloudConfigYaml)))
+          params.userdata = base64Encoded
         }
         
         const response = await axios.post(`http://localhost:8081/api/machines/${machine.id}/deploy`, null, {

@@ -215,10 +215,11 @@ MachinesTab.vue (실시간 UI 업데이트)
 ### 3.2 Configuration Tab 기능
 
 #### 기능명: Deployable OS 이미지 목록 조회
-- **설명**: MAAS에서 설치 가능한 OS 이미지 목록을 조회하여 표시
+- **설명**: MAAS에서 설치 가능한 OS 이미지 목록을 조회하여 표시하고, 각 OS별로 Deploy된 머신 수를 표시
 - **입력**: 없음 (자동 로드)
 - **출력**: OS 이미지 목록 테이블
-  - OS, Release, Version, Architecture 컬럼
+  - OS, Release, Version, Architecture, Deployed Machines 컬럼
+  - 같은 OS의 여러 release는 OS 이름을 rowspan으로 병합하여 표시
 - **주요 코드 파일**:
   - `ConfigurationTab.vue`: Images 섹션
   - `MaasController.getDeployableOS()`: API 엔드포인트
@@ -230,7 +231,14 @@ MachinesTab.vue (실시간 UI 업데이트)
   4. 각 boot source의 `/MAAS/api/2.0/boot-sources/{id}/selections/` 호출하여 selections 조회
   5. 모든 selections를 병합하여 deployable OS 목록 생성
   6. Ubuntu release 버전 매핑 (xenial → 16.04 LTS 등)
-  7. 테이블 형태로 표시
+  7. OS별로 그룹화하여 테이블 형태로 표시
+  8. 같은 OS의 여러 release는 OS 이름을 rowspan으로 병합
+  9. 머신 목록을 로드하여 각 OS/release 조합에 대해 Deployed 상태인 머신 수 계산
+  10. Deployed Machines 컬럼에 각 OS/release로 배포된 머신 수 표시
+- **UI 특징**:
+  - OS 이름은 첫 번째 release 행에만 표시하고 rowspan으로 병합
+  - OS 이름 셀은 배경색과 테두리로 구분
+  - Deployed Machines 컬럼에는 해당 OS/release로 배포된 머신 수 표시
 - **에러 처리**:
   - API 호출 실패 시 에러 메시지 표시
   - Retry 버튼 제공
@@ -256,10 +264,14 @@ MachinesTab.vue (실시간 UI 업데이트)
   6. 태그 이름을 배지 스타일로 표시
   7. "+ Add Tag" 버튼 클릭 시 태그 생성 모달 표시
   8. 태그 행 클릭 시 태그 정보 모달 표시 (수정/삭제 가능)
-  9. 태그 삭제 시 커스텀 확인 모달 표시
-  10. 삭제 확인 후 MAAS API `DELETE /MAAS/api/2.0/tags/{name}/` 호출
-  11. 204 NO_CONTENT 응답 처리
-  12. 태그 목록 자동 새로고침
+  9. Update 버튼은 실제로 내용이 변경되었을 때만 활성화
+  10. 태그 삭제 시 커스텀 확인 모달 표시
+  11. 삭제 확인 후 MAAS API `DELETE /MAAS/api/2.0/tags/{name}/` 호출
+  12. 204 NO_CONTENT 응답 처리
+  13. 태그 목록 자동 새로고침
+- **UI/UX 특징**:
+  - Update 버튼은 원본 데이터와 비교하여 변경사항이 있을 때만 활성화
+  - 새로 생성하는 경우는 유효성 검사만 수행
 - **에러 처리**:
   - API 호출 실패 시 커스텀 알림 모달로 에러 메시지 표시
   - Retry 버튼 제공
@@ -272,6 +284,8 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 설명 (선택)
   - Cloud-Config YAML (필수)
 - **출력**: 템플릿 목록 테이블 및 편집 모달
+  - Name, Tags, Description 컬럼
+  - 템플릿 행 클릭 시 템플릿 정보 모달 표시
 - **주요 코드 파일**:
   - `ConfigurationTab.vue`: Cloud-Config Templates 섹션
   - localStorage: `maas-cloud-config-templates` 키로 저장
@@ -280,17 +294,19 @@ MachinesTab.vue (실시간 UI 업데이트)
   2. 기존 데이터 마이그레이션 (단일 tag → tags 배열)
   3. 템플릿 목록 테이블 표시
   4. "+ Add Template" 버튼 클릭 시 템플릿 생성 모달 표시
-  5. 템플릿 편집 버튼 클릭 시 편집 모달 표시
+  5. 템플릿 행 클릭 시 템플릿 정보 모달 표시 (수정/삭제 가능)
   6. 모달에서:
      - Name 입력
      - MAAS Tags 목록에서 체크박스로 태그 선택 (다중 선택 가능)
      - Description 입력
      - Cloud-Config YAML 입력 (코드 에디터 스타일)
   7. "Create" 또는 "Update" 버튼 클릭
-  8. 템플릿 데이터 저장 (localStorage)
-  9. 템플릿 목록 새로고침
-  10. 템플릿 삭제 시 커스텀 확인 모달 표시
-  11. 삭제 확인 후 템플릿 목록에서 제거 및 localStorage 업데이트
+  8. Update 버튼은 실제로 내용이 변경되었을 때만 활성화
+  9. 템플릿 데이터 저장 (localStorage)
+  10. 템플릿 목록 새로고침
+  11. 템플릿 삭제 시 커스텀 확인 모달 표시
+  12. 삭제 확인 후 템플릿 목록에서 제거 및 localStorage 업데이트
+  13. 삭제된 템플릿이 편집 중이었다면 모달 자동 닫기
 - **태그 연계**:
   - 하나의 템플릿은 여러 태그와 연관 가능 (tags 배열)
   - Deploy 시 머신의 태그와 템플릿의 태그를 비교하여 매칭
@@ -298,6 +314,11 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **데이터 저장**:
   - localStorage에 JSON 형식으로 저장
   - 각 템플릿은 id, name, tags, description, cloudConfig, createdAt, updatedAt 필드 포함
+- **UI/UX 특징**:
+  - 템플릿 행 클릭 시 모달 표시 (Tags와 동일한 방식)
+  - 모달 제목: "Template Information" (편집 시)
+  - Update 버튼은 원본 데이터와 비교하여 변경사항이 있을 때만 활성화
+  - Delete 버튼은 모달 footer에 표시 (편집 모드일 때만)
 - **에러 처리**:
   - 필수 필드 검증 (Name, Cloud-Config YAML)
   - localStorage 저장 실패 시 커스텀 알림 모달로 에러 메시지 표시
@@ -681,28 +702,35 @@ MachinesTab.vue (실시간 UI 업데이트)
      - "Other Templates" 그룹: 매칭되지 않은 템플릿
      - "None" 옵션: Cloud-Config 없이 배포
      - "Custom..." 옵션: 직접 Cloud-Config YAML 입력
-  8. 사용자가 OS 및 Cloud-Config 템플릿 선택:
+  8. 자동 템플릿 선택:
+     - 머신의 태그와 매칭되는 템플릿이 정확히 1개인 경우 자동으로 선택
+     - 매칭되는 템플릿이 0개 또는 2개 이상인 경우 "None"이 기본값
+  9. 사용자가 OS 및 Cloud-Config 템플릿 선택:
      - OS는 필수 선택
      - Cloud-Config 템플릿은 선택사항 (None, 템플릿 선택, Custom)
-  9. 템플릿 선택 시 미리보기 표시
-  10. "Deploy" 버튼 클릭
-  11. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
-      - 요청 파라미터: `maasUrl`, `apiKey`, `os`, `release`, `arch`
-      - userdata는 향후 추가 예정
-  12. 백엔드에서 Form Data 생성:
-      - `distro_series`: `os/release` 형식 (예: `ubuntu/noble`, `ubuntu/jammy`)
-      - `architecture`: 선택된 architecture (있는 경우)
-      - `userdata`: 선택된 템플릿의 Cloud-Config 또는 Custom Cloud-Config (향후 추가)
-  13. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
-      - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
-      - `BodyInserters.fromFormData()` 사용
-  14. 성공 시:
-      - 모달 닫기
-      - 버튼이 "Abort"로 변경
-      - 머신 상태가 "Deploying"으로 변경
-      - 선택된 OS 정보 저장 (`deployingOS`, `deployingRelease`)
-      - STATUS 컬럼에 OS 버전 표시 (예: "Ubuntu 24.04")
-  15. WebSocket을 통한 상태 업데이트 수신
+  10. 템플릿 선택 시 미리보기 표시
+  11. "Deploy" 버튼 클릭
+  12. Cloud-Config YAML 처리:
+     - 선택된 템플릿이 있으면 해당 템플릿의 Cloud-Config YAML 사용
+     - Custom이 선택되었으면 사용자가 입력한 YAML 사용
+     - YAML이 있으면 base64 인코딩하여 `userdata` 파라미터에 추가
+  13. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
+     - 요청 파라미터: `maasUrl`, `apiKey`, `os`, `release`, `arch`, `userdata` (선택)
+     - `userdata`: base64 인코딩된 Cloud-Config YAML
+  14. 백엔드에서 Form Data 생성:
+     - `distro_series`: `os/release` 형식 (예: `ubuntu/noble`, `ubuntu/jammy`)
+     - `architecture`: 선택된 architecture (있는 경우)
+     - `user_data`: base64 인코딩된 Cloud-Config YAML (선택된 템플릿 또는 Custom YAML)
+  15. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
+     - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
+     - `BodyInserters.fromFormData()` 사용
+  16. 성공 시:
+     - 모달 자동 닫기
+     - 버튼이 "Abort"로 변경
+     - 머신 상태가 "Deploying"으로 변경
+     - 선택된 OS 정보 저장 (`deployingOS`, `deployingRelease`)
+     - STATUS 컬럼에 OS 버전 표시 (예: "Ubuntu 24.04")
+  17. WebSocket을 통한 상태 업데이트 수신
 - **UI/UX 특징**:
   - Deploy 모달: OS 선택과 Cloud-Config 설정을 한 화면에서 처리
   - OS 선택 드롭다운: 기본값 OS 자동 선택
@@ -940,7 +968,7 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **주요 코드 파일**:
   - `MachinesTab.vue`: 
     - `showMachineDetails()`: 머신 상세 정보 모달 열기
-    - `closeMachineDetailsModal()`: 모달 닫기 (Power Type 변경 시 머신 목록 자동 리로드)
+    - `closeMachineDetailsModal()`: 모달 닫기 (Power Type 변경 시에만 머신 목록 자동 리로드)
     - `loadMachineEvents()`: MAAS 이벤트 로드 및 필터링
     - `loadMachinePowerParameters()`: IPMI Power 파라미터 로드
     - `startEditingPowerParameters()`: Power 파라미터 편집 모드 시작
@@ -2580,7 +2608,7 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
       - Power가 `off` 상태이면 "Turn on"만 표시
       - Power가 `on` 상태이면 "Turn off"만 표시
       - "Check power"는 항상 표시 (모든 Power 상태에서 사용 가능)
-    - Power on/off 성공 시 2초 후 머신 목록 자동 새로고침
+    - Power on/off 성공 시 WebSocket을 통해 상태 자동 업데이트 (페이지 리로드 없음)
     - Check power 성공 시 응답의 `state` 값으로 머신의 `power_state`만 업데이트 (다른 작업 수행 안 함)
   - **일괄 Power 작업**:
     - 액션 바의 Power 드롭다운 메뉴에서 일괄 Power on/off 지원
@@ -2590,6 +2618,8 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
       - 혼재 상태 → 둘 다 비활성화
     - `handleBulkPowerAction()`: 선택된 모든 머신에 대해 Power on/off API 호출
     - 결과 요약 표시 (성공/실패 개수)
+    - WebSocket을 통해 상태 자동 업데이트 (페이지 리로드 없음)
+    - WebSocket을 통해 상태 자동 업데이트 (페이지 리로드 없음)
   - **Check power 기능**:
     - MAAS에서 IPMI 상태 업데이트 주기가 길기 때문에 수동으로 전원 상태를 확인
     - 전원 상태를 조회만 하고 변경하지 않음
