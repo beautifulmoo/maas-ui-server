@@ -4375,31 +4375,12 @@ export default {
       }
     }
     
-    // Load Cloud-Config Templates from localStorage
-    const loadCloudConfigTemplates = () => {
+    // Load Cloud-Config Templates from API
+    const loadCloudConfigTemplates = async () => {
       try {
-        const stored = localStorage.getItem('maas-cloud-config-templates')
-        if (stored) {
-          const templates = JSON.parse(stored)
-          // Migrate old format (tag -> tags)
-          cloudConfigTemplates.value = templates.map(template => {
-            if (template.tag && !template.tags) {
-              // Old format: single tag
-              return {
-                ...template,
-                tags: template.tag ? [template.tag] : []
-              }
-            } else if (!template.tags) {
-              // No tags at all
-              return {
-                ...template,
-                tags: []
-              }
-            }
-            return template
-          })
-          // Save migrated data back to localStorage
-          localStorage.setItem('maas-cloud-config-templates', JSON.stringify(cloudConfigTemplates.value))
+        const response = await axios.get('http://localhost:8081/api/cloud-config-templates')
+        if (response.data && response.data.success && response.data.templates) {
+          cloudConfigTemplates.value = response.data.templates
         } else {
           cloudConfigTemplates.value = []
         }
@@ -4504,20 +4485,26 @@ export default {
         return
       }
       
-      // Cloud-Config YAML 가져오기
+      // Cloud-Config YAML 또는 base64 인코딩된 값 가져오기
       let cloudConfigYaml = null
+      let cloudConfigBase64 = null
       if (selectedCloudConfigTemplate.value === 'custom' && customCloudConfig.value) {
         cloudConfigYaml = customCloudConfig.value
       } else if (selectedCloudConfigTemplate.value !== 'none' && selectedCloudConfigTemplate.value !== 'custom') {
         const template = cloudConfigTemplates.value.find(t => t.id === selectedCloudConfigTemplate.value)
-        if (template && template.cloudConfig) {
-          cloudConfigYaml = template.cloudConfig
+        if (template) {
+          // base64 인코딩된 값이 있으면 우선 사용
+          if (template.cloudConfigBase64) {
+            cloudConfigBase64 = template.cloudConfigBase64
+          } else if (template.cloudConfig) {
+            cloudConfigYaml = template.cloudConfig
+          }
         }
       }
       
       deployingMachine.value = true
       try {
-        await deployMachine(selectedDeployMachine.value, selectedDeployOS.value, cloudConfigYaml)
+        await deployMachine(selectedDeployMachine.value, selectedDeployOS.value, cloudConfigYaml, cloudConfigBase64)
         // 배포 시작 성공 시 모달 닫기
         deployingMachine.value = false
         closeDeployModal(true) // 강제로 닫기
@@ -5099,7 +5086,7 @@ export default {
     }
     
     // Deploy Machine
-    const deployMachine = async (machine, os = null, cloudConfigYaml = null) => {
+    const deployMachine = async (machine, os = null, cloudConfigYaml = null, cloudConfigBase64 = null) => {
       if (machine.status !== 'ready' && machine.status !== 'allocated') {
         return
       }
@@ -5140,8 +5127,10 @@ export default {
           }
         }
         
-        // Cloud-Config YAML이 있으면 base64 인코딩하여 추가
-        if (cloudConfigYaml && cloudConfigYaml.trim()) {
+        // Cloud-Config 처리: base64 인코딩된 값이 있으면 우선 사용, 없으면 YAML을 인코딩
+        if (cloudConfigBase64) {
+          params.userdata = cloudConfigBase64
+        } else if (cloudConfigYaml && cloudConfigYaml.trim()) {
           // Base64 인코딩
           const base64Encoded = btoa(unescape(encodeURIComponent(cloudConfigYaml)))
           params.userdata = base64Encoded

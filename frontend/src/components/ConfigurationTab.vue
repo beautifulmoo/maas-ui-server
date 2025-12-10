@@ -358,7 +358,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import axios from 'axios'
 import { useSettings } from '../composables/useSettings'
 
-const STORAGE_KEY = 'maas-cloud-config-templates'
+const API_BASE_URL = 'http://localhost:8081/api'
 
 export default {
   name: 'ConfigurationTab',
@@ -577,11 +577,11 @@ export default {
     }
     
     // Cloud-Config Templates Functions
-    const loadCloudConfigTemplates = () => {
+    const loadCloudConfigTemplates = async () => {
       try {
-        const stored = localStorage.getItem(STORAGE_KEY)
-        if (stored) {
-          cloudConfigTemplates.value = JSON.parse(stored)
+        const response = await axios.get(`${API_BASE_URL}/cloud-config-templates`)
+        if (response.data && response.data.success && response.data.templates) {
+          cloudConfigTemplates.value = response.data.templates
         } else {
           cloudConfigTemplates.value = []
         }
@@ -591,11 +591,15 @@ export default {
       }
     }
     
-    const saveCloudConfigTemplates = () => {
+    const saveCloudConfigTemplates = async () => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudConfigTemplates.value))
+        const response = await axios.post(`${API_BASE_URL}/cloud-config-templates`, cloudConfigTemplates.value)
+        if (!response.data || !response.data.success) {
+          throw new Error(response.data?.error || 'Failed to save templates')
+        }
       } catch (err) {
         console.error('Error saving cloud-config templates:', err)
+        throw err
       }
     }
     
@@ -653,25 +657,33 @@ export default {
              (original.cloudConfig || '') !== (current.cloudConfig || '')
     })
     
-    const saveTemplate = () => {
+    const saveTemplate = async () => {
       if (!isTemplateFormValid.value) {
         return
       }
       
       // Use selected tags directly
       const selectedTags = templateForm.value.selectedTags || []
+      const cloudConfigYaml = templateForm.value.cloudConfig.trim()
+      
+      // Base64 인코딩 (JavaScript의 btoa(unescape(encodeURIComponent()))와 동일)
+      const cloudConfigBase64 = btoa(unescape(encodeURIComponent(cloudConfigYaml)))
       
       const templateData = {
         id: editingTemplate.value ? editingTemplate.value.id : Date.now().toString(),
         name: templateForm.value.name.trim(),
         tags: selectedTags,
         description: templateForm.value.description.trim(),
-        cloudConfig: templateForm.value.cloudConfig.trim(),
+        cloudConfig: cloudConfigYaml,
+        cloudConfigBase64: cloudConfigBase64,
         updatedAt: new Date().toISOString()
       }
       
       if (editingTemplate.value) {
-        // Update existing template
+        // Update existing template - createdAt 유지
+        if (editingTemplate.value.createdAt) {
+          templateData.createdAt = editingTemplate.value.createdAt
+        }
         const index = cloudConfigTemplates.value.findIndex(t => t.id === editingTemplate.value.id)
         if (index !== -1) {
           cloudConfigTemplates.value[index] = templateData
@@ -682,8 +694,12 @@ export default {
         cloudConfigTemplates.value.push(templateData)
       }
       
-      saveCloudConfigTemplates()
-      closeTemplateModal()
+      try {
+        await saveCloudConfigTemplates()
+        closeTemplateModal()
+      } catch (err) {
+        await customAlert('템플릿 저장에 실패했습니다: ' + (err.response?.data?.error || err.message || 'Unknown error'), '오류')
+      }
     }
     
     const deleteTemplate = async (templateId) => {
@@ -693,10 +709,14 @@ export default {
       const confirmed = await customConfirm(confirmMessage, '삭제 확인', '삭제')
       if (confirmed) {
         cloudConfigTemplates.value = cloudConfigTemplates.value.filter(t => t.id !== templateId)
-        saveCloudConfigTemplates()
-        // If the deleted template was being edited, close the modal
-        if (editingTemplate.value && editingTemplate.value.id === templateId) {
-          closeTemplateModal()
+        try {
+          await saveCloudConfigTemplates()
+          // If the deleted template was being edited, close the modal
+          if (editingTemplate.value && editingTemplate.value.id === templateId) {
+            closeTemplateModal()
+          }
+        } catch (err) {
+          await customAlert('템플릿 삭제에 실패했습니다: ' + (err.response?.data?.error || err.message || 'Unknown error'), '오류')
         }
       }
     }

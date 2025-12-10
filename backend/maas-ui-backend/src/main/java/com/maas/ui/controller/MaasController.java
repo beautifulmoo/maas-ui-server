@@ -3,6 +3,7 @@ package com.maas.ui.controller;
 import com.maas.ui.service.MaasApiService;
 import com.maas.ui.service.MaasAuthService;
 import com.maas.ui.service.SettingsService;
+import com.maas.ui.service.CloudConfigTemplateService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -10,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.Map;
 import java.util.HashMap;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api")
@@ -24,6 +26,9 @@ public class MaasController {
     
     @Autowired
     private SettingsService settingsService;
+    
+    @Autowired
+    private CloudConfigTemplateService cloudConfigTemplateService;
     
     /**
      * 설정을 가져옵니다.
@@ -727,6 +732,42 @@ public class MaasController {
                     errorResponse.put("error", "Failed to delete tag: " + e.getMessage());
                     return Mono.just(ResponseEntity.status(500).body(errorResponse));
                 });
+    }
+    
+    /**
+     * Cloud-Config 템플릿 목록을 가져옵니다.
+     */
+    @GetMapping("/cloud-config-templates")
+    public ResponseEntity<Map<String, Object>> getCloudConfigTemplates() {
+        try {
+            List<Map<String, Object>> templates = cloudConfigTemplateService.loadTemplates();
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("templates", templates);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("success", false, "error", "Failed to load cloud-config templates: " + e.getMessage()));
+        }
+    }
+    
+    /**
+     * Cloud-Config 템플릿을 저장합니다 (생성 또는 수정).
+     */
+    @PostMapping("/cloud-config-templates")
+    public ResponseEntity<Map<String, Object>> saveCloudConfigTemplates(@RequestBody List<Map<String, Object>> templates) {
+        try {
+            boolean success = cloudConfigTemplateService.saveTemplates(templates);
+            if (success) {
+                return ResponseEntity.ok(Map.of("success", true, "message", "Cloud-Config templates saved successfully"));
+            } else {
+                return ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to save cloud-config templates"));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("success", false, "error", "Failed to save cloud-config templates: " + e.getMessage()));
+        }
     }
     
     /**

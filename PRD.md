@@ -288,40 +288,58 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 템플릿 행 클릭 시 템플릿 정보 모달 표시
 - **주요 코드 파일**:
   - `ConfigurationTab.vue`: Cloud-Config Templates 섹션
-  - localStorage: `maas-cloud-config-templates` 키로 저장
+  - `MaasController.getCloudConfigTemplates()`, `saveCloudConfigTemplates()`: API 엔드포인트
+  - `CloudConfigTemplateService`: 파일 기반 저장 서비스
+  - `maas-cloud-config-templates.json`: 템플릿 저장 파일
 - **내부 로직 흐름**:
-  1. 컴포넌트 마운트 시 localStorage에서 템플릿 목록 로드
-  2. 기존 데이터 마이그레이션 (단일 tag → tags 배열)
-  3. 템플릿 목록 테이블 표시
-  4. "+ Add Template" 버튼 클릭 시 템플릿 생성 모달 표시
-  5. 템플릿 행 클릭 시 템플릿 정보 모달 표시 (수정/삭제 가능)
-  6. 모달에서:
+  1. 컴포넌트 마운트 시 백엔드 API에서 템플릿 목록 로드
+  2. 백엔드 `/api/cloud-config-templates` GET 요청
+  3. 백엔드에서 `maas-cloud-config-templates.json` 파일 읽기
+  4. 기존 데이터 마이그레이션 (단일 tag → tags 배열, base64 인코딩 값 자동 생성)
+  5. 템플릿 목록 테이블 표시
+  6. "+ Add Template" 버튼 클릭 시 템플릿 생성 모달 표시
+  7. 템플릿 행 클릭 시 템플릿 정보 모달 표시 (수정/삭제 가능)
+  8. 모달에서:
      - Name 입력
      - MAAS Tags 목록에서 체크박스로 태그 선택 (다중 선택 가능)
      - Description 입력
      - Cloud-Config YAML 입력 (코드 에디터 스타일)
-  7. "Create" 또는 "Update" 버튼 클릭
-  8. Update 버튼은 실제로 내용이 변경되었을 때만 활성화
-  9. 템플릿 데이터 저장 (localStorage)
-  10. 템플릿 목록 새로고침
-  11. 템플릿 삭제 시 커스텀 확인 모달 표시
-  12. 삭제 확인 후 템플릿 목록에서 제거 및 localStorage 업데이트
-  13. 삭제된 템플릿이 편집 중이었다면 모달 자동 닫기
+  9. "Create" 또는 "Update" 버튼 클릭
+  10. Update 버튼은 실제로 내용이 변경되었을 때만 활성화
+  11. Cloud-Config YAML을 base64 인코딩하여 `cloudConfigBase64` 필드 생성
+  12. 백엔드 `/api/cloud-config-templates` POST 요청으로 템플릿 데이터 저장
+  13. 백엔드에서 `maas-cloud-config-templates.json` 파일에 저장
+  14. 템플릿 목록 새로고침
+  15. 템플릿 삭제 시 커스텀 확인 모달 표시
+  16. 삭제 확인 후 템플릿 목록에서 제거 및 백엔드에 저장
+  17. 삭제된 템플릿이 편집 중이었다면 모달 자동 닫기
 - **태그 연계**:
   - 하나의 템플릿은 여러 태그와 연관 가능 (tags 배열)
   - Deploy 시 머신의 태그와 템플릿의 태그를 비교하여 매칭
   - 매칭되는 템플릿이 "Recommended" 그룹에 우선 표시
 - **데이터 저장**:
-  - localStorage에 JSON 형식으로 저장
-  - 각 템플릿은 id, name, tags, description, cloudConfig, createdAt, updatedAt 필드 포함
+  - 백엔드 서버의 `maas-cloud-config-templates.json` 파일에 JSON 형식으로 저장
+  - 프로젝트 루트 디렉토리에 저장 (서버 재시작 후에도 유지)
+  - 각 템플릿은 다음 필드 포함:
+    - `id`: 고유 식별자
+    - `name`: 템플릿 이름
+    - `tags`: 연관된 태그 배열
+    - `description`: 설명
+    - `cloudConfig`: Cloud-Config YAML 원본
+    - `cloudConfigBase64`: base64 인코딩된 Cloud-Config YAML (Deploy 시 사용)
+    - `createdAt`: 생성 일시
+    - `updatedAt`: 수정 일시
+  - 기존 템플릿 로드 시 `cloudConfigBase64`가 없으면 자동 생성
 - **UI/UX 특징**:
   - 템플릿 행 클릭 시 모달 표시 (Tags와 동일한 방식)
   - 모달 제목: "Template Information" (편집 시)
   - Update 버튼은 원본 데이터와 비교하여 변경사항이 있을 때만 활성화
   - Delete 버튼은 모달 footer에 표시 (편집 모드일 때만)
+  - 기존 템플릿 수정 시 `createdAt` 필드 유지
 - **에러 처리**:
   - 필수 필드 검증 (Name, Cloud-Config YAML)
-  - localStorage 저장 실패 시 커스텀 알림 모달로 에러 메시지 표시
+  - API 호출 실패 시 커스텀 알림 모달로 에러 메시지 표시
+  - 파일 저장 실패 시 에러 메시지 반환
 
 ### 3.3 Machines Tab 기능
 
@@ -691,7 +709,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   1. "Deploy" 버튼 클릭 (Ready 또는 Allocated 상태에서만 활성화)
   2. Deploy 모달 표시
   3. Deployable OS 목록 로드 (`/api/deployable-os` 호출, 최초 1회만)
-  4. Cloud-Config 템플릿 목록 로드 (localStorage에서)
+  4. Cloud-Config 템플릿 목록 로드 (백엔드 API에서)
   5. 머신의 태그와 매칭되는 템플릿 자동 필터링
   6. OS 목록 정렬 및 기본값 설정:
      - OS 이름별로 그룹화
@@ -1358,6 +1376,12 @@ public class MaasController {
     - POST /api/machines/{systemId}/power-off
     - GET /api/machines/{systemId}/query-power-state
     - GET /api/test-connection
+    - GET /api/tags
+    - POST /api/tags
+    - PUT /api/tags/{oldName}
+    - DELETE /api/tags/{name}
+    - GET /api/cloud-config-templates
+    - POST /api/cloud-config-templates
 }
 ```
 
@@ -1445,6 +1469,19 @@ public class MaasController {
   - `loadSettings()`: 설정 파일 로드
   - `saveSettings(settings)`: 설정 파일 저장
   - `getDefaultSettings()`: 기본값 반환
+- **파일 위치**: 프로젝트 루트 디렉토리의 `maas-ui-settings.json`
+
+##### CloudConfigTemplateService
+- **역할**: Cloud-Config 템플릿 파일 관리
+- **주요 메서드**:
+  - `loadTemplates()`: 템플릿 파일 로드 및 마이그레이션
+  - `saveTemplates(templates)`: 템플릿 파일 저장 (base64 인코딩 자동 추가)
+  - `migrateTemplates(templates)`: 기존 형식 마이그레이션 (tag → tags, base64 자동 생성)
+- **파일 위치**: 프로젝트 루트 디렉토리의 `maas-cloud-config-templates.json`
+- **마이그레이션 기능**:
+  - 기존 단일 `tag` 필드를 `tags` 배열로 변환
+  - `cloudConfigBase64` 필드가 없으면 자동 생성
+  - 마이그레이션이 필요한 경우 자동으로 파일 업데이트
 
 #### REST API 엔드포인트 명세
 
@@ -1759,6 +1796,64 @@ public class MaasController {
 - **MAAS API**: `DELETE /MAAS/api/2.0/tags/{name}/`
 - **MAAS 응답**: HTTP 204 NO_CONTENT (본문 없음)
 - **백엔드 처리**: `toBodilessEntity()`를 사용하여 204 응답 처리
+
+##### GET /api/cloud-config-templates
+- **설명**: Cloud-Config 템플릿 목록 조회
+- **요청**: 없음
+- **응답**:
+```json
+{
+  "success": true,
+  "templates": [
+    {
+      "id": "1765329925967",
+      "name": "kolla",
+      "tags": ["kolla-ansible"],
+      "description": "",
+      "cloudConfig": "#cloud-config\n\npackage_update: true\n...",
+      "cloudConfigBase64": "I2Nsb3VkLWNvbmZpZwoKcGFja2FnZV91cGRhdGU6IHRydWUuLi4=",
+      "createdAt": "2025-12-10T01:25:25.967Z",
+      "updatedAt": "2025-12-10T01:30:47.703Z"
+    }
+  ]
+}
+```
+- **주요 코드 파일**:
+  - `MaasController.getCloudConfigTemplates()`: API 엔드포인트
+  - `CloudConfigTemplateService.loadTemplates()`: 파일 로드 및 마이그레이션
+- **파일 위치**: 프로젝트 루트 디렉토리의 `maas-cloud-config-templates.json`
+
+##### POST /api/cloud-config-templates
+- **설명**: Cloud-Config 템플릿 저장 (생성 또는 수정)
+- **요청 본문**: 템플릿 배열
+```json
+[
+  {
+    "id": "1765329925967",
+    "name": "kolla",
+    "tags": ["kolla-ansible"],
+    "description": "",
+    "cloudConfig": "#cloud-config\n\npackage_update: true\n...",
+    "cloudConfigBase64": "I2Nsb3VkLWNvbmZpZwoKcGFja2FnZV91cGRhdGU6IHRydWUuLi4=",
+    "createdAt": "2025-12-10T01:25:25.967Z",
+    "updatedAt": "2025-12-10T01:30:47.703Z"
+  }
+]
+```
+- **응답**:
+```json
+{
+  "success": true,
+  "message": "Cloud-Config templates saved successfully"
+}
+```
+- **주요 코드 파일**:
+  - `MaasController.saveCloudConfigTemplates()`: API 엔드포인트
+  - `CloudConfigTemplateService.saveTemplates()`: 파일 저장 (base64 인코딩 자동 추가)
+- **파일 위치**: 프로젝트 루트 디렉토리의 `maas-cloud-config-templates.json`
+- **자동 처리**:
+  - `cloudConfigBase64` 필드가 없으면 `cloudConfig`를 base64 인코딩하여 자동 추가
+  - 서버 재시작 후에도 데이터 유지
 - **주요 코드 파일**:
   - `MaasController.deleteTag()`: API 엔드포인트
   - `MaasApiService.deleteTag()`: MAAS API 호출
@@ -2241,6 +2336,22 @@ public class MaasController {
   "itemsPerPage": "50",
   "showAdvancedInfo": false
 }
+```
+
+#### maas-cloud-config-templates.json
+```json
+[
+  {
+    "id": "1765329925967",
+    "name": "kolla",
+    "tags": ["kolla-ansible"],
+    "description": "",
+    "cloudConfig": "#cloud-config\n\npackage_update: true\n...",
+    "cloudConfigBase64": "I2Nsb3VkLWNvbmZpZwoKcGFja2FnZV91cGRhdGU6IHRydWUuLi4=",
+    "createdAt": "2025-12-10T01:25:25.967Z",
+    "updatedAt": "2025-12-10T01:30:47.703Z"
+  }
+]
 ```
 
 #### application.properties
