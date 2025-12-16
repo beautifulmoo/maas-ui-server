@@ -244,6 +244,15 @@
             <td class="status-col">
               <div class="status-container">
                 <div class="status-badge-row">
+                  <span 
+                    v-if="isStatusInProgress(machine.status)"
+                    class="status-spinner"
+                    :class="{
+                      'spinner-commissioning': machine.status?.toLowerCase() === 'commissioning',
+                      'spinner-deploying': machine.status?.toLowerCase() === 'deploying'
+                    }"
+                    :title="getStatusText(machine.status)"
+                  ></span>
                   <span :class="['status-badge', machine.status]">
                     {{ getStatusText(machine.status) }}
                   </span>
@@ -7677,6 +7686,39 @@ export default {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.3rem;
+}
+
+.status-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top: 2px solid #f57c00;
+  border-right: 2px solid #f57c00;
+  border-bottom: 2px solid #f57c00;
+  border-left: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Commissioning 상태일 때 스피너 색상 */
+.status-spinner.spinner-commissioning {
+  border-top-color: #f57c00;
+  border-right-color: #f57c00;
+  border-bottom-color: #f57c00;
+}
+
+/* Deploying 상태일 때 스피너 색상 */
+.status-spinner.spinner-deploying {
+  border-top-color: #00695c;
+  border-right-color: #00695c;
+  border-bottom-color: #00695c;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .status-badge {

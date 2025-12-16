@@ -351,6 +351,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 페이지 번호
 - **출력**: 머신 목록 테이블
   - FQDN, Power State/Power Type, Status, Owner/Tags, Pool, Zone, Fabric
+  - Status 컬럼: 진행 중인 상태일 때 회전하는 로딩 스피너 아이콘 표시
   - CPU Cores, RAM, Disk Count, Storage
   - 액션 버튼 (Commission, Network, Deploy)
   - Power Action (Turn on, Turn off) - 드롭다운 메뉴
@@ -1217,6 +1218,16 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 버전은 숫자만 표시 (LTS 등 제외)
   - `deployingOS`와 `deployingRelease` 정보 사용
   - Ubuntu release 매핑: xenial → 16.04, bionic → 18.04, focal → 20.04, jammy → 22.04, noble → 24.04
+- **로딩 스피너**: 진행 중인 상태(Commissioning, Deploying 등)일 때 STATUS 컬럼에 회전하는 스피너 아이콘 표시
+  - 스피너는 상태 배지 앞에 위치
+  - CSS 애니메이션으로 1초에 한 바퀴 회전
+  - 스피너 크기: 12px × 12px
+  - 스피너 호 길이: 원의 약 3/4 정도 (border-top, border-right, border-bottom 색상)
+  - 상태별 스피너 색상:
+    - Commissioning: 주황색 (#f57c00)
+    - Deploying: 청록색 (#00695c)
+    - 기타 진행 중 상태: 기본 주황색
+  - `isStatusInProgress()` 함수로 진행 중 상태 판별
 
 #### Release 버튼 동작
 
@@ -2393,7 +2404,10 @@ maas.default.api-key=consumer_key:token:token_secret
     - 체크박스 컬럼 (전체 선택 체크박스 + 상태별 선택 드롭다운 아이콘)
     - FQDN 컬럼 (호스트명, MAC 주소, IP 주소)
     - Power 컬럼 (Power State, Power Type, Power Action 드롭다운)
-    - Status 컬럼 (상태 배지, 상태 메시지)
+    - Status 컬럼 (로딩 스피너, 상태 배지, 상태 메시지)
+      - 진행 중인 상태(Commissioning, Deploying 등)일 때 회전하는 스피너 아이콘 표시
+      - 스피너는 상태 배지 앞에 위치
+      - 상태별 스피너 색상: Commissioning(주황색), Deploying(청록색)
     - Owner/Tags 컬럼
     - Pool, Zone, Fabric 컬럼
     - 하드웨어 정보 컬럼 (Cores, RAM, Disks, Storage)
