@@ -96,8 +96,10 @@ maas-ui-server/
 
 #### 프론트엔드 모듈
 1. **App.vue**: 메인 애플리케이션 컴포넌트
-   - 탭 네비게이션 (Dashboard, Machines, Settings)
+   - 탭 네비게이션 (Dashboard, Machines, Configuration, Settings)
+   - 탭 버튼: 활성/비활성 상태에 관계없이 항상 2px border-bottom 유지 (비활성: transparent, 활성: 파란색)
    - 전역 스타일 및 레이아웃
+   - 스크롤바 항상 표시 (레이아웃 시프트 방지)
 
 2. **DashboardTab.vue**: 대시보드 화면
    - 머신 통계 표시 (전체, 커미셔닝됨, 배포됨)
@@ -541,7 +543,7 @@ MachinesTab.vue (실시간 UI 업데이트)
   - 액션 수행 후 머신 목록 자동 새로고침
 
 #### 기능명: 머신 추가 (Add Machine)
-- **설명**: 새로운 물리적 서버를 MAAS에 등록
+- **설명**: 새로운 물리적 서버를 MAAS에 등록 (단일 등록 또는 CSV를 통한 대량 등록)
 - **입력**:
   - Hostname (선택)
   - Architecture (기본값: amd64)
@@ -567,26 +569,43 @@ MachinesTab.vue (실시간 UI 업데이트)
   - `MaasController.addMachine()`: API 엔드포인트
   - `MaasApiService.addMachine()`: MAAS API 호출
 - **내부 로직 흐름**:
-  1. "Add Machine" 버튼 클릭 → 모달 표시
-  2. 사용자가 폼 입력
-  3. Power Type이 "ipmi"로 변경되면:
-     - Commission 자동으로 "true"로 설정
-     - IPMI Configuration 섹션 표시 (박스로 그룹핑)
-  4. MAC 주소 형식 검증
-  5. 백엔드 `/api/machines` POST 요청
-     - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
-     - 빈 값 필드는 form data에 포함하지 않음
-  6. MAAS API `/MAAS/api/2.0/machines/` POST 요청
-     - **Form Data 형식 사용** (`BodyInserters.fromFormData()`)
-     - IPMI 파라미터는 `power_parameters_` 접두사로 전송
-  7. 성공 시 머신 목록 새로고침
+  1. "[+ Add Machine(s)]" 드롭다운 버튼 클릭
+  2. 드롭다운 메뉴에서 선택:
+     - **"Add Single Machine"**: 단일 머신 등록 모달 표시
+     - **"Bulk Add from CSV"**: CSV 업로드 모달 표시
+  3. **단일 등록 모드**:
+     - 사용자가 폼 입력
+     - Power Type이 "ipmi"로 변경되면:
+       - Commission 자동으로 "true"로 설정
+       - IPMI Configuration 섹션 표시 (박스로 그룹핑)
+     - MAC 주소 형식 검증
+     - 백엔드 `/api/machines` POST 요청
+     - 성공 시 머신 목록 새로고침
+  4. **대량 등록 모드** (CSV):
+     - 샘플 CSV 파일 미리보기 또는 다운로드
+     - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
+     - CSV 형식 검증 (향후 구현)
+     - CSV 파싱 및 미리보기 (향후 구현)
+     - 대량 등록 처리 (향후 구현)
 - **UI/UX 특징**:
-  - IPMI Configuration 필드들은 박스로 그룹핑되어 시각적으로 구분됨
-  - IPMI Configuration 헤더로 섹션 구분
-  - 입력되지 않은 필드는 form data에 포함되지 않음
+  - 드롭다운 버튼: "[+ Add Machine(s) ▼]" 형태로 단일/대량 등록 선택
+  - 단일 등록 모달:
+    - IPMI Configuration 필드들은 박스로 그룹핑되어 시각적으로 구분됨
+    - IPMI Configuration 헤더로 섹션 구분
+    - 입력되지 않은 필드는 form data에 포함되지 않음
+    - 모달 드래그 가능 (헤더를 드래그하여 이동)
+    - 모달 바깥쪽 클릭 시 닫히지 않음 (Cancel 또는 X 버튼으로만 닫힘)
+  - 대량 등록 모달:
+    - 샘플 CSV 미리보기 테이블
+    - 샘플 CSV 다운로드 버튼
+    - 파일 업로드 영역 (드래그 앤 드롭 지원)
+    - 선택된 파일 정보 표시 (이름, 크기)
+    - 모달 드래그 가능
+    - 모달 바깥쪽 클릭 시 닫히지 않음
 - **에러 처리**:
   - MAC 주소 형식 오류 검증
   - API 오류 메시지 표시
+  - CSV 형식 오류 검증 (향후 구현)
 
 #### 기능명: 머신 커미셔닝 (Commission)
 - **설명**: 머신을 커미셔닝하여 하드웨어 정보 수집 및 설정
@@ -2225,7 +2244,9 @@ public class MaasController {
 ##### App.vue
 - **역할**: 메인 애플리케이션 컴포넌트
 - **기능**:
-  - 탭 네비게이션 (Dashboard, Machines, Settings)
+  - 탭 네비게이션 (Dashboard, Machines, Configuration, Settings)
+  - 탭 버튼 스타일: 활성/비활성 상태에 관계없이 항상 2px border-bottom 유지하여 레이아웃 시프트 방지
+  - 스크롤바 항상 표시: `html`에 `overflow-y: scroll` 설정하여 스크롤바로 인한 레이아웃 변화 방지
   - 전역 스타일 및 레이아웃
 - **상태**: `activeTab` (현재 활성 탭)
 
@@ -2399,7 +2420,10 @@ maas.default.api-key=consumer_key:token:token_secret
     - 액션 바 (머신 선택 시 표시): Actions 드롭다운, Power 드롭다운, Delete 버튼, 선택된 머신 수
   - 검색 박스
   - 필터 버튼 (All, New, Commissioning, Ready, Allocated, Deployed, Failed)
-  - "Add Machine" 버튼
+  - "[+ Add Machine(s) ▼]" 드롭다운 버튼
+    - "Add Single Machine": 단일 머신 등록 모달
+    - "Bulk Add from CSV": CSV를 통한 대량 등록 모달
+  - 컨텐츠 영역 (로딩/에러 메시지와 테이블을 감싸는 고정 높이 컨테이너)
   - 머신 테이블
     - 체크박스 컬럼 (전체 선택 체크박스 + 상태별 선택 드롭다운 아이콘)
     - FQDN 컬럼 (호스트명, MAC 주소, IP 주소)
@@ -2414,7 +2438,8 @@ maas.default.api-key=consumer_key:token:token_secret
     - Actions 컬럼 (상태별 동적 버튼: Commission/Release, Network, Deploy)
   - 페이지네이션
   - 모달:
-    - Add Machine 모달
+    - Add Machine 모달 (드래그 가능, 바깥 클릭으로 닫히지 않음)
+    - Bulk Add from CSV 모달 (드래그 가능, 바깥 클릭으로 닫히지 않음)
     - Network 설정 모달
     - Machine Details 모달 (드래그 가능)
     - Confirm/Alert 모달 (드래그 가능)
@@ -2425,9 +2450,12 @@ maas.default.api-key=consumer_key:token:token_secret
     - **Network**: 파랑 (저장 가능), 연한 파랑 (읽기 전용), 회색 (비활성화)
     - **Deploy**: 분홍색 (활성화), 주황색 (Abort), 회색 (비활성화)
     - **Release**: Release 전용 스타일 (Failed 상태)
+  - 타이틀: h2 태그에 고정 margin, padding, line-height, min-height 설정으로 로딩 전후 위치 일관성 유지
+  - 컨텐츠 영역: 로딩/에러 메시지와 테이블을 감싸는 고정 높이 컨테이너로 로딩 전후 버튼 위치 일관성 유지
 
 #### Configuration Tab
 - **레이아웃**: 섹션별 카드 형태
+- **타이틀**: h2 태그에 고정 margin, padding, line-height, min-height 설정으로 로딩 전후 위치 일관성 유지
 - **컴포넌트**:
   - **Images 섹션**: Deploy 가능한 OS 이미지 목록
     - OS, Release, Version, Architecture 컬럼으로 테이블 구성
@@ -2449,6 +2477,7 @@ maas.default.api-key=consumer_key:token:token_secret
 
 #### Settings Tab
 - **레이아웃**: 섹션별 폼
+- **타이틀**: h2 태그에 고정 margin, padding, line-height, min-height 설정으로 로딩 전후 위치 일관성 유지
 - **컴포넌트**:
   - MAAS API Configuration 섹션
     - MAAS Server URL 입력 필드
@@ -2469,13 +2498,21 @@ maas.default.api-key=consumer_key:token:token_secret
 ### 5.2 사용자 입력 흐름
 
 #### 머신 추가 흐름
-1. Machines Tab에서 "Add Machine" 버튼 클릭
-2. 모달 표시
-3. 폼 입력 (Hostname, MAC Addresses, Architecture, Power Type, Commission 여부, Description)
-4. MAC 주소 형식 검증
-5. "Add" 버튼 클릭
-6. API 호출
-7. 성공 시 모달 닫기 및 머신 목록 새로고침
+1. Machines Tab에서 "[+ Add Machine(s) ▼]" 드롭다운 버튼 클릭
+2. 드롭다운 메뉴에서 선택:
+   - **"Add Single Machine"**: 단일 머신 등록 모달 표시
+   - **"Bulk Add from CSV"**: CSV 업로드 모달 표시
+3. **단일 등록 모드**:
+   - 폼 입력 (Hostname, MAC Addresses, Architecture, Power Type, Commission 여부, Description)
+   - MAC 주소 형식 검증
+   - "Add Machine" 버튼 클릭
+   - API 호출
+   - 성공 시 모달 닫기 및 머신 목록 새로고침
+4. **대량 등록 모드** (CSV):
+   - 샘플 CSV 파일 확인 또는 다운로드
+   - CSV 파일 업로드
+   - CSV 파싱 및 검증 (향후 구현)
+   - 대량 등록 처리 (향후 구현)
 
 #### 커미셔닝 흐름
 1. Machines Tab에서 머신의 "Commission" 버튼 클릭

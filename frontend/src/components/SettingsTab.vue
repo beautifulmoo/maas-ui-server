@@ -183,9 +183,13 @@ export default {
 
 <style scoped>
 .settings h2 {
-  margin-bottom: 2rem;
+  margin: 0 0 2rem 0;
+  padding: 0;
   color: #2c3e50;
   font-size: 1.8rem;
+  line-height: 1.2;
+  min-height: calc(1.8rem * 1.2);
+  display: block;
 }
 
 .settings-sections {

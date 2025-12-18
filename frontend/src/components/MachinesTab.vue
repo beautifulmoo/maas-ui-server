@@ -149,13 +149,28 @@
       </div>
 
             <div class="action-buttons">
-              <button class="btn-primary add-machine-btn" @click="showAddMachineModal">
+              <div class="dropdown-container">
+                <button class="btn-primary add-machine-btn" @click.stop="toggleAddMachineDropdown">
                 <span class="btn-icon">+</span>
-                Add Machine
+                  Add Machine(s)
+                  <span class="dropdown-arrow">▼</span>
+                </button>
+                <div v-if="showAddMachineDropdown" class="dropdown-menu" @click.stop>
+                  <button class="dropdown-item" @click="showAddMachineModal">
+                    <span class="dropdown-item-icon">+</span>
+                    Add Single Machine
+                  </button>
+                  <button class="dropdown-item" @click="showBulkAddModal">
+                    <span class="dropdown-item-icon">📄</span>
+                    Bulk Add from CSV
         </button>
+                </div>
+              </div>
       </div>
     </div>
     
+    <!-- Fixed height container for loading/error messages to prevent layout shift -->
+    <div class="content-area">
     <div class="loading" v-if="loading">
       <p>Loading machines...</p>
     </div>
@@ -253,9 +268,9 @@
                     }"
                     :title="getStatusText(machine.status)"
                   ></span>
-                  <span :class="['status-badge', machine.status]">
-                    {{ getStatusText(machine.status) }}
-                  </span>
+          <span :class="['status-badge', machine.status]">
+                  {{ getStatusText(machine.status) }}
+          </span>
                   <span v-if="machine.status?.toLowerCase() === 'deploying' && machine.deployingOS && machine.deployingRelease" class="status-os-version">
                     {{ getDeployingOSVersion(machine) }}
                   </span>
@@ -370,6 +385,30 @@
         </tbody>
       </table>
         </div>
+        
+    <div v-if="!loading && !error && filteredMachines.length === 0" class="no-machines">
+      <p>No machines found matching your criteria.</p>
+          </div>
+    
+    <!-- Pagination -->
+    <div class="pagination" v-if="!loading && !error && filteredMachines.length > 0">
+      <div class="pagination-info">
+          Showing {{ (currentPage - 1) * itemsPerPage + 1 }}-{{ Math.min(currentPage * itemsPerPage, filteredMachines.length) }} of {{ filteredMachines.length }} machines ({{ machines.length }} total)
+          </div>
+      <div class="pagination-controls">
+        <button class="btn-small" :disabled="currentPage === 1" @click="currentPage = 1">
+          &lt; Page {{ currentPage }} of {{ totalPages }} &gt;
+        </button>
+        <select v-model="itemsPerPage" class="page-size-select">
+            <option value="10">10/page</option>
+          <option value="25">25/page</option>
+          <option value="50">50/page</option>
+          <option value="100">100/page</option>
+        </select>
+        </div>
+      </div>
+    </div>
+    <!-- End of content-area -->
     
     <!-- Confirmation Modal -->
     <Teleport to="body">
@@ -614,28 +653,6 @@
         </div>
       </div>
     </div>
-        
-    <div v-if="!loading && !error && filteredMachines.length === 0" class="no-machines">
-      <p>No machines found matching your criteria.</p>
-          </div>
-    
-    <!-- Pagination -->
-    <div class="pagination" v-if="!loading && !error && filteredMachines.length > 0">
-      <div class="pagination-info">
-        Showing {{ (currentPage - 1) * itemsPerPage + 1 }}-{{ Math.min(currentPage * itemsPerPage, filteredMachines.length) }} of {{ filteredMachines.length }} machines ({{ machines.length }} total)
-          </div>
-      <div class="pagination-controls">
-        <button class="btn-small" :disabled="currentPage === 1" @click="currentPage = 1">
-          &lt; Page {{ currentPage }} of {{ totalPages }} &gt;
-        </button>
-        <select v-model="itemsPerPage" class="page-size-select">
-          <option value="10">10/page</option>
-          <option value="25">25/page</option>
-          <option value="50">50/page</option>
-          <option value="100">100/page</option>
-        </select>
-          </div>
-          </div>
 
     <!-- Network Modal -->
     <div v-if="showNetworkModalState" class="modal-overlay" @click="closeNetworkModal">
@@ -1804,9 +1821,17 @@
           </div>
 
     <!-- Add Machine Modal -->
-    <div v-if="showAddModal" class="modal-overlay" @click="closeAddMachineModal">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
+    <div v-if="showAddModal" class="modal-overlay">
+      <div 
+        class="modal-content" 
+        @click.stop
+        :style="(addModalPosition?.top || addModalPosition?.left) ? { position: 'fixed', top: (addModalPosition?.top || 0) + 'px', left: (addModalPosition?.left || 0) + 'px', margin: 0 } : {}"
+      >
+        <div 
+          class="modal-header"
+          @mousedown="startDragAddModal"
+          :style="isDraggingAddModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
           <h3>Add New Machine</h3>
           <button class="close-btn" @click="closeAddMachineModal">&times;</button>
         </div>
@@ -2108,6 +2133,114 @@
         </form>
       </div>
     </div>
+
+    <!-- Bulk Add Machine Modal -->
+    <div v-if="showBulkAddModalState" class="modal-overlay" @click="closeBulkAddModal">
+      <div class="modal-content bulk-add-modal" @click.stop>
+        <div class="modal-header">
+          <h3>Bulk Add Machines from CSV</h3>
+          <button class="close-btn" @click="closeBulkAddModal">&times;</button>
+        </div>
+        
+        <div class="bulk-add-content">
+          <!-- Sample CSV Section -->
+          <div class="sample-csv-section">
+            <h4>CSV Format</h4>
+            <p class="section-description">Please prepare your CSV file with the following format. The exact column structure will be determined later.</p>
+            
+            <div class="sample-csv-preview">
+              <div class="sample-csv-header">
+                <span>Sample CSV Preview</span>
+                <button class="btn-small btn-secondary" @click="downloadSampleCSV">
+                  <span>📥</span> Download Sample
+                </button>
+              </div>
+              <div class="sample-csv-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Column 1</th>
+                      <th>Column 2</th>
+                      <th>Column 3</th>
+                      <th>...</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Sample data 1</td>
+                      <td>Sample data 2</td>
+                      <td>Sample data 3</td>
+                      <td>...</td>
+                    </tr>
+                    <tr>
+                      <td>Sample data 1</td>
+                      <td>Sample data 2</td>
+                      <td>Sample data 3</td>
+                      <td>...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="note-text">Note: CSV format will be finalized after requirements are confirmed.</p>
+            </div>
+          </div>
+
+          <!-- File Upload Section -->
+          <div class="file-upload-section">
+            <h4>Upload CSV File</h4>
+            <div class="file-upload-area" 
+                 :class="{ 'drag-over': isDragOver }"
+                 @drop="handleFileDrop"
+                 @dragover.prevent="isDragOver = true"
+                 @dragleave="isDragOver = false"
+                 @click="triggerFileInput">
+              <input 
+                type="file" 
+                ref="csvFileInput"
+                accept=".csv"
+                @change="handleFileSelect"
+                style="display: none"
+              >
+              <div class="upload-content">
+                <span class="upload-icon">📁</span>
+                <p class="upload-text">
+                  <strong>Click to select</strong> or drag and drop CSV file here
+                </p>
+                <p class="upload-hint">CSV files only</p>
+              </div>
+            </div>
+            
+            <div v-if="selectedCsvFile" class="selected-file">
+              <span class="file-icon">📄</span>
+              <span class="file-name">{{ selectedCsvFile.name }}</span>
+              <span class="file-size">({{ formatFileSize(selectedCsvFile.size) }})</span>
+              <button class="btn-remove-file" @click="clearSelectedFile">×</button>
+            </div>
+          </div>
+
+          <!-- Preview Section (will be implemented later) -->
+          <div v-if="false" class="preview-section">
+            <h4>Preview</h4>
+            <p class="section-description">CSV parsing and preview will be implemented after CSV format is finalized.</p>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="closeBulkAddModal">
+            Cancel
+          </button>
+          <button 
+            type="button" 
+            class="btn-primary" 
+            :disabled="!selectedCsvFile || uploadingBulkMachines"
+            @click="uploadBulkMachines"
+          >
+            <span v-if="uploadingBulkMachines">Processing...</span>
+            <span v-else>Upload & Process</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -2153,6 +2286,22 @@ export default {
     const showAddModal = ref(false)
     const addingMachine = ref(false)
     const macAddressError = ref('')
+    
+    // Add Machine Modal Drag
+    const isDraggingAddModal = ref(false)
+    const addModalPosition = ref({ top: 0, left: 0 })
+    const addDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // Add Machine Dropdown
+    const showAddMachineDropdown = ref(false)
+    
+    // Bulk Add Machine Modal
+    const showBulkAddModalState = ref(false)
+    const selectedCsvFile = ref(null)
+    const csvFileInput = ref(null)
+    const isDragOver = ref(false)
+    const uploadingBulkMachines = ref(false)
+    
     const newMachine = ref({
       hostname: '',
       architecture: 'amd64',
@@ -3896,7 +4045,12 @@ export default {
     }
     
     // Add Machine Modal Functions
+    const toggleAddMachineDropdown = () => {
+      showAddMachineDropdown.value = !showAddMachineDropdown.value
+    }
+    
     const showAddMachineModal = () => {
+      showAddMachineDropdown.value = false
       showAddModal.value = true
       resetNewMachineForm()
     }
@@ -3904,6 +4058,154 @@ export default {
     const closeAddMachineModal = () => {
       showAddModal.value = false
       resetNewMachineForm()
+      // Reset modal position when closing
+      addModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    // Add Machine Modal drag handlers
+    const startDragAddModal = (event) => {
+      if (event.button !== 0) return // Only left mouse button
+      isDraggingAddModal.value = true
+      const modalElement = event.currentTarget.closest('.modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        addDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        // If modal hasn't been moved yet, center it
+        if (!addModalPosition.value.top && !addModalPosition.value.left) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          addModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragAddModal = (event) => {
+      if (!isDraggingAddModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.modal-content')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - addDragStartPosition.value.x
+      let newTop = event.clientY - addDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      addModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragAddModal = () => {
+      isDraggingAddModal.value = false
+    }
+    
+    // Add global mousemove and mouseup listeners when dragging
+    watch(isDraggingAddModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragAddModal)
+        document.addEventListener('mouseup', stopDragAddModal)
+      } else {
+        document.removeEventListener('mousemove', onDragAddModal)
+        document.removeEventListener('mouseup', stopDragAddModal)
+      }
+    })
+    
+    // Bulk Add Machine Modal Functions
+    const showBulkAddModal = () => {
+      showAddMachineDropdown.value = false
+      showBulkAddModalState.value = true
+      clearSelectedFile()
+    }
+    
+    const closeBulkAddModal = () => {
+      showBulkAddModalState.value = false
+      clearSelectedFile()
+      isDragOver.value = false
+    }
+    
+    const triggerFileInput = () => {
+      csvFileInput.value?.click()
+    }
+    
+    const handleFileSelect = (event) => {
+      const file = event.target.files?.[0]
+      if (file) {
+        if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+          selectedCsvFile.value = file
+        } else {
+          alert('Please select a CSV file')
+        }
+      }
+    }
+    
+    const handleFileDrop = (event) => {
+      event.preventDefault()
+      isDragOver.value = false
+      const file = event.dataTransfer.files?.[0]
+      if (file) {
+        if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+          selectedCsvFile.value = file
+        } else {
+          alert('Please drop a CSV file')
+        }
+      }
+    }
+    
+    const clearSelectedFile = () => {
+      selectedCsvFile.value = null
+      if (csvFileInput.value) {
+        csvFileInput.value.value = ''
+      }
+    }
+    
+    const formatFileSize = (bytes) => {
+      if (bytes === 0) return '0 Bytes'
+      const k = 1024
+      const sizes = ['Bytes', 'KB', 'MB', 'GB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+    }
+    
+    const downloadSampleCSV = () => {
+      // Placeholder: Will be implemented after CSV format is finalized
+      const sampleContent = 'Column 1,Column 2,Column 3\nSample data 1,Sample data 2,Sample data 3\nSample data 1,Sample data 2,Sample data 3'
+      const blob = new Blob([sampleContent], { type: 'text/csv' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'sample-machines.csv'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    }
+    
+    const uploadBulkMachines = () => {
+      // Placeholder: Will be implemented after CSV format and backend are ready
+      if (!selectedCsvFile.value) return
+      uploadingBulkMachines.value = true
+      
+      // TODO: Implement CSV parsing and bulk upload
+      setTimeout(() => {
+        alert('Bulk upload functionality will be implemented after CSV format is finalized.')
+        uploadingBulkMachines.value = false
+      }, 1000)
     }
     
     const resetNewMachineForm = () => {
@@ -6816,8 +7118,12 @@ export default {
       }
     })
     
-    // 외부 클릭 시 Power 메뉴, Status Select 메뉴, Action Bar 메뉴 닫기
+    // 외부 클릭 시 Power 메뉴, Status Select 메뉴, Action Bar 메뉴, Add Machine 드롭다운 닫기
     const handleClickOutside = (event) => {
+      // Add Machine 드롭다운
+      if (!event.target.closest('.dropdown-container') && !event.target.closest('.dropdown-menu')) {
+        showAddMachineDropdown.value = false
+      }
       // Power 메뉴 (개별 머신)
       if (!event.target.closest('.power-container') && !event.target.closest('.power-dropdown-menu')) {
         openPowerMenu.value = null
@@ -6918,6 +7224,28 @@ export default {
         newMachine,
         showAddMachineModal,
         closeAddMachineModal,
+        // Add Machine Modal Drag
+        isDraggingAddModal,
+        addModalPosition,
+        startDragAddModal,
+        // Add Machine Dropdown
+        showAddMachineDropdown,
+        toggleAddMachineDropdown,
+        // Bulk Add Machine Modal
+        showBulkAddModalState,
+        selectedCsvFile,
+        csvFileInput,
+        isDragOver,
+        uploadingBulkMachines,
+        showBulkAddModal,
+        closeBulkAddModal,
+        triggerFileInput,
+        handleFileSelect,
+        handleFileDrop,
+        clearSelectedFile,
+        formatFileSize,
+        downloadSampleCSV,
+        uploadBulkMachines,
         validateMacAddress,
         addMachine,
         // Commission Machine
@@ -7069,18 +7397,22 @@ export default {
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
   flex-wrap: nowrap;
   min-height: 48px; /* 액션 바가 나타날 때를 고려한 최소 높이 */
   height: auto;
 }
 
 .machines h2 {
-  margin: 0;
+  margin: 0 0 2rem 0;
+  padding: 0;
   color: #2c3e50;
   font-size: 1.8rem;
+  line-height: 1.2;
+  min-height: calc(1.8rem * 1.2);
+  display: block;
   flex: 0 0 auto;
 }
 
@@ -7130,6 +7462,7 @@ export default {
   align-items: center;
   margin-bottom: 2rem;
   gap: 1rem;
+  min-height: 48px; /* 로딩 중에도 높이 유지 */
 }
 
 .search-box {
@@ -7303,8 +7636,9 @@ export default {
 .machines-table td {
   padding: 0.75rem 0.5rem;
   border-bottom: 1px solid #e9ecef;
-  vertical-align: top;
+  vertical-align: middle; /* 모든 셀을 수직 중앙 정렬 */
   font-size: 0.8rem;
+  line-height: 1.5; /* line-height 통일 */
 }
 
 .machine-row:hover {
@@ -7382,8 +7716,12 @@ export default {
   width: 180px !important; /* 버튼들이 한 줄로 보이도록 늘림 */
   min-width: 180px;
   max-width: 180px;
-  text-align: left !important; /* 왼쪽 정렬 */
-  vertical-align: top;
+  text-align: center !important; /* 중앙 정렬 */
+  vertical-align: middle !important; /* 수직 중앙 정렬 강제 */
+  padding: 0.75rem 0.5rem !important; /* 다른 셀과 동일한 패딩 강제 */
+  height: auto; /* 높이 자동 조정 */
+  /* 테이블 셀은 display: flex 사용 불가, 대신 내부 요소로 정렬 */
+  line-height: 24px; /* 버튼 높이와 동일한 line-height로 수직 정렬 안정화 */
 }
 
 .action-buttons-wrapper {
@@ -7791,10 +8129,19 @@ export default {
 }
 
 .action-buttons {
-  display: flex;
+  display: inline-flex;
   flex-direction: row; /* 한 줄로 배치 */
   gap: 0.2rem; /* Horizontal gap between buttons */
-  align-items: flex-start; /* 왼쪽 정렬 */
+  align-items: center; /* 수직 중앙 정렬 */
+  justify-content: center; /* 수평 중앙 정렬 */
+  width: auto;
+  max-width: 100%;
+  margin: 0; /* margin 제거 */
+  padding: 0;
+  flex-wrap: nowrap; /* 버튼들이 줄바꿈되지 않도록 */
+  vertical-align: middle; /* 인라인 요소로 수직 중앙 정렬 */
+  line-height: 24px; /* 버튼 높이와 동일한 line-height */
+  height: 24px; /* 버튼 높이와 동일하게 설정 */
 }
 
 .action-buttons-row {
@@ -7805,22 +8152,58 @@ export default {
 }
 
 .btn-small {
-  padding: 0.25rem 0.5rem; /* Increased padding for better height */
+  padding: 0.25rem 0.5rem; /* 좌우 대칭 패딩 */
   border: none;
-  border-radius: 4px; /* 모든 버튼 동일한 모서리 */
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
-  font-weight: 500; /* 폰트 굵기 통일 */
+  font-size: 0.7rem;
+  font-weight: 500;
   transition: all 0.2s ease;
   white-space: nowrap;
-  text-align: center;
-  height: 24px; /* Fixed height for consistency */
-  display: flex;
+  height: 24px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: auto; /* 글자 길이에 맞춤 */
-  min-width: auto; /* 최소 너비 제거 */
+  width: auto;
+  min-width: auto;
+  line-height: 1;
+  text-align: center;
+  position: relative;
+  /* 내부 요소 정렬 강화 */
+  flex-direction: row;
+  gap: 0;
+}
+
+/* 버튼 내부 모든 자식 요소 중앙 정렬 */
+.btn-small > * {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 버튼 내부 span 태그 정렬 */
+.btn-small > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  width: auto;
+  min-width: 0;
+}
+
+.btn-small > span > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  width: auto;
+  min-width: 0;
 }
 
 .btn-small.btn-primary {
@@ -7829,7 +8212,7 @@ export default {
   font-size: 0.7rem; /* 녹색 버튼과 동일한 폰트 크기 */
   font-weight: 500; /* 폰트 굵기 통일 */
   border-radius: 4px; /* 녹색 버튼과 동일한 모서리 */
-  padding: 0.25rem 0.4rem; /* Network 버튼 가로 크기 줄이기 */
+  padding: 0.25rem 0.5rem; /* 좌우 패딩 통일 */
 }
 
 .btn-small.btn-primary:hover:not(:disabled) {
@@ -7842,7 +8225,7 @@ export default {
   font-size: 0.7rem; /* 모든 버튼 동일한 폰트 크기 */
   font-weight: 500; /* 폰트 굵기 통일 */
   border-radius: 4px; /* 모든 버튼 동일한 모서리 */
-  padding: 0.25rem 0.4rem;
+  padding: 0.25rem 0.5rem; /* 좌우 패딩 통일 */
 }
 
 .btn-small.btn-primary-light:hover:not(:disabled) {
@@ -7993,10 +8376,18 @@ export default {
   font-size: 0.9rem;
 }
 
+.content-area {
+  min-height: 200px; /* 로딩/에러 메시지가 나타나도 레이아웃이 변하지 않도록 고정 높이 */
+}
+
 .loading, .error, .no-machines {
   text-align: center;
   padding: 2rem;
   color: #6c757d;
+  min-height: 200px; /* 고정 높이로 레이아웃 시프트 방지 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Machine Details Modal 내부의 로딩/에러 상태도 고정 높이 */
@@ -8046,6 +8437,254 @@ export default {
 .btn-icon {
   font-size: 1.1rem;
   font-weight: bold;
+}
+
+/* Dropdown Styles */
+.dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-arrow {
+  font-size: 0.7rem;
+  margin-left: 0.5rem;
+  opacity: 0.8;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.5rem;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  min-width: 200px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: white;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.dropdown-item:hover {
+  background-color: #f5f5f5;
+}
+
+.dropdown-item-icon {
+  font-size: 1rem;
+  width: 1.2rem;
+  text-align: center;
+}
+
+/* Bulk Add Modal Styles */
+.bulk-add-modal {
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.bulk-add-content {
+  padding: 1.5rem;
+}
+
+.sample-csv-section,
+.file-upload-section,
+.preview-section {
+  margin-bottom: 2rem;
+}
+
+.sample-csv-section h4,
+.file-upload-section h4,
+.preview-section h4 {
+  margin-bottom: 0.5rem;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.section-description {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.sample-csv-preview {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sample-csv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.sample-csv-header span {
+  font-weight: 500;
+  color: #333;
+}
+
+.sample-csv-table {
+  overflow-x: auto;
+}
+
+.sample-csv-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sample-csv-table th,
+.sample-csv-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.sample-csv-table th {
+  background-color: #f8f9fa;
+  font-weight: 500;
+  color: #333;
+}
+
+.sample-csv-table td {
+  color: #666;
+}
+
+.note-text {
+  padding: 0.75rem 1rem;
+  color: #666;
+  font-size: 0.85rem;
+  font-style: italic;
+  background-color: #f8f9fa;
+  margin: 0;
+}
+
+.file-upload-area {
+  border: 2px dashed #d0d0d0;
+  border-radius: 6px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: #fafafa;
+}
+
+.file-upload-area:hover {
+  border-color: #007bff;
+  background-color: #f0f7ff;
+}
+
+.file-upload-area.drag-over {
+  border-color: #007bff;
+  background-color: #e6f2ff;
+}
+
+.upload-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.upload-icon {
+  font-size: 3rem;
+  opacity: 0.6;
+}
+
+.upload-text {
+  margin: 0;
+  color: #333;
+}
+
+.upload-text strong {
+  color: #007bff;
+}
+
+.upload-hint {
+  margin: 0;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.selected-file {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background-color: #f0f7ff;
+  border: 1px solid #007bff;
+  border-radius: 6px;
+}
+
+.file-icon {
+  font-size: 1.2rem;
+}
+
+.file-name {
+  flex: 1;
+  font-weight: 500;
+  color: #333;
+}
+
+.file-size {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.btn-remove-file {
+  background: none;
+  border: none;
+  color: #dc3545;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.btn-remove-file:hover {
+  background-color: #fee;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e0e0e0;
+  background-color: #fafafa;
+}
+
+.btn-small {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+
+.btn-small span {
+  margin-right: 0.25rem;
 }
 
 /* Modal Styles */

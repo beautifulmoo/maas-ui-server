@@ -72,9 +72,15 @@ export default {
   box-sizing: border-box;
 }
 
+html {
+  overflow-y: scroll; /* 스크롤바를 항상 표시하여 레이아웃 시프트 방지 */
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: #f5f5f5;
+  margin: 0;
+  padding: 0;
 }
 
 #app {
@@ -117,6 +123,7 @@ body {
   flex: 1;
   padding: 1rem 2rem;
   border: none;
+  border-bottom: 2px solid transparent; /* 항상 2px border 유지 */
   background: none;
   cursor: pointer;
   font-size: 1rem;
@@ -133,7 +140,7 @@ body {
 .tab-button.active {
   background-color: white;
   color: #2c3e50;
-  border-bottom: 2px solid #007bff;
+  border-bottom: 2px solid #007bff; /* 두께는 동일, 색상만 변경 */
 }
 
 .tab-content {
