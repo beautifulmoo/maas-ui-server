@@ -2136,8 +2136,16 @@
 
     <!-- Bulk Add Machine Modal -->
     <div v-if="showBulkAddModalState" class="modal-overlay" @click="closeBulkAddModal">
-      <div class="modal-content bulk-add-modal" @click.stop>
-        <div class="modal-header">
+      <div 
+        class="modal-content bulk-add-modal" 
+        @click.stop
+        :style="(bulkAddModalPosition?.top || bulkAddModalPosition?.left) ? { position: 'fixed', top: (bulkAddModalPosition?.top || 0) + 'px', left: (bulkAddModalPosition?.left || 0) + 'px', margin: 0 } : {}"
+      >
+        <div 
+          class="modal-header modal-draggable-header" 
+          @mousedown="startDragBulkAddModal"
+          :style="isDraggingBulkAddModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
           <h3>Bulk Add Machines from CSV</h3>
           <button class="close-btn" @click="closeBulkAddModal">&times;</button>
         </div>
@@ -2146,7 +2154,7 @@
           <!-- Sample CSV Section -->
           <div class="sample-csv-section">
             <h4>CSV Format</h4>
-            <p class="section-description">Please prepare your CSV file with the following format. The exact column structure will be determined later.</p>
+            <p class="section-description">Please prepare your CSV file with the following format. The first row must be the header row.</p>
             
             <div class="sample-csv-preview">
               <div class="sample-csv-header">
@@ -2159,29 +2167,65 @@
                 <table>
                   <thead>
                     <tr>
-                      <th>Column 1</th>
-                      <th>Column 2</th>
-                      <th>Column 3</th>
-                      <th>...</th>
+                      <th>hostname</th>
+                      <th>architecture</th>
+                      <th>mac_address</th>
+                      <th>power_type</th>
+                      <th>commission</th>
+                      <th>description</th>
+                      <th>power_driver</th>
+                      <th>power_boot_type</th>
+                      <th>power_address</th>
+                      <th>power_user</th>
+                      <th>power_pass</th>
+                      <th>k_g</th>
+                      <th>cipher_suite_id</th>
+                      <th>privilege_level</th>
+                      <th>workaround_flags</th>
+                      <th>power_mac_address</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td>Sample data 1</td>
-                      <td>Sample data 2</td>
-                      <td>Sample data 3</td>
-                      <td>...</td>
+                      <td>test-vm-00</td>
+                      <td>amd64</td>
+                      <td>aa:bb:cc:dd:ee:ff</td>
+                      <td>ipmi</td>
+                      <td>true</td>
+                      <td>test 00</td>
+                      <td>LAN_2_0</td>
+                      <td>auto</td>
+                      <td>172.29.244.51</td>
+                      <td>ADMIN</td>
+                      <td>ADMIN</td>
+                      <td></td>
+                      <td>3</td>
+                      <td>OPERATOR</td>
+                      <td>opensesspriv</td>
+                      <td>08:00:27:11:34:28</td>
                     </tr>
                     <tr>
-                      <td>Sample data 1</td>
-                      <td>Sample data 2</td>
-                      <td>Sample data 3</td>
-                      <td>...</td>
+                      <td>test-vm-01</td>
+                      <td>amd64</td>
+                      <td>aa:bb:cc:dd:ee:fe</td>
+                      <td>manual</td>
+                      <td>false</td>
+                      <td>test 01</td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <p class="note-text">Note: CSV format will be finalized after requirements are confirmed.</p>
+              <p class="note-text">Note: Empty fields can be left blank. IPMI fields are only required when power_type is 'ipmi'.</p>
             </div>
           </div>
 
@@ -2237,6 +2281,74 @@
           >
             <span v-if="uploadingBulkMachines">Processing...</span>
             <span v-else>Upload & Process</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- CSV Validation Result Modal -->
+    <div v-if="showValidationModal" class="modal-overlay" @click="closeValidationModal">
+      <div 
+        class="modal-content validation-result-modal" 
+        @click.stop
+        :style="(validationModalPosition?.top || validationModalPosition?.left) ? { position: 'fixed', top: (validationModalPosition?.top || 0) + 'px', left: (validationModalPosition?.left || 0) + 'px', margin: 0 } : {}"
+      >
+        <div 
+          class="modal-header modal-draggable-header" 
+          @mousedown="startDragValidationModal"
+          :style="isDraggingValidationModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+        >
+          <h3>CSV Validation Result</h3>
+          <button class="close-btn" @click="closeValidationModal">&times;</button>
+        </div>
+        
+        <div class="modal-body" v-if="csvValidationResult">
+          <div class="validation-summary">
+            <div class="summary-item" :class="{ 'success': csvValidationResult.isValid, 'error': !csvValidationResult.isValid }">
+              <span class="summary-label">Status:</span>
+              <span class="summary-value">
+                <strong v-if="csvValidationResult.isValid">✓ All rows are valid</strong>
+                <strong v-else>✗ Validation failed</strong>
+              </span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Total Rows:</span>
+              <span class="summary-value">{{ csvValidationResult.totalRows }}</span>
+            </div>
+            <div class="summary-item" :class="{ 'success': csvValidationResult.validRows > 0 }">
+              <span class="summary-label">Valid Rows:</span>
+              <span class="summary-value">{{ csvValidationResult.validRows }}</span>
+            </div>
+            <div class="summary-item" :class="{ 'error': csvValidationResult.errorRows > 0 }">
+              <span class="summary-label">Error Rows:</span>
+              <span class="summary-value">{{ csvValidationResult.errorRows }}</span>
+            </div>
+          </div>
+          
+          <div v-if="csvValidationResult.errors && csvValidationResult.errors.length > 0" class="validation-errors">
+            <h4>Errors:</h4>
+            <div class="error-list">
+              <div v-for="(error, index) in csvValidationResult.errors" :key="index" class="error-item">
+                <span class="error-row">Row {{ error.row }}:</span>
+                <span class="error-message">{{ error.message }}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div v-if="csvValidationResult.warnings && csvValidationResult.warnings.length > 0" class="validation-warnings">
+            <h4>Warnings:</h4>
+            <div class="warning-list">
+              <div v-for="(warning, index) in csvValidationResult.warnings" :key="index" class="warning-item">
+                <span class="warning-row">Row {{ warning.row }}:</span>
+                <span class="warning-message">{{ warning.message }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" @click="closeValidationModal">
+            Close
           </button>
         </div>
       </div>
@@ -2301,6 +2413,16 @@ export default {
     const csvFileInput = ref(null)
     const isDragOver = ref(false)
     const uploadingBulkMachines = ref(false)
+    const isDraggingBulkAddModal = ref(false)
+    const bulkAddModalPosition = ref({ top: 0, left: 0 })
+    const bulkAddDragStartPosition = ref({ x: 0, y: 0 })
+    
+    // CSV Validation
+    const showValidationModal = ref(false)
+    const csvValidationResult = ref(null)
+    const isDraggingValidationModal = ref(false)
+    const validationModalPosition = ref({ top: 0, left: 0 })
+    const validationDragStartPosition = ref({ x: 0, y: 0 })
     
     const newMachine = ref({
       hostname: '',
@@ -4126,15 +4248,81 @@ export default {
       }
     })
     
+    // Bulk Add Machine Modal drag handlers
+    const startDragBulkAddModal = (event) => {
+      if (event.button !== 0) return // Only left mouse button
+      isDraggingBulkAddModal.value = true
+      const modalElement = event.currentTarget.closest('.modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        bulkAddDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        // If modal hasn't been moved yet, center it
+        if (!bulkAddModalPosition.value.top && !bulkAddModalPosition.value.left) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          bulkAddModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragBulkAddModal = (event) => {
+      if (!isDraggingBulkAddModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.bulk-add-modal')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - bulkAddDragStartPosition.value.x
+      let newTop = event.clientY - bulkAddDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      bulkAddModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragBulkAddModal = () => {
+      isDraggingBulkAddModal.value = false
+    }
+    
+    // Add global mousemove and mouseup listeners when dragging
+    watch(isDraggingBulkAddModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragBulkAddModal)
+        document.addEventListener('mouseup', stopDragBulkAddModal)
+      } else {
+        document.removeEventListener('mousemove', onDragBulkAddModal)
+        document.removeEventListener('mouseup', stopDragBulkAddModal)
+      }
+    })
+    
     // Bulk Add Machine Modal Functions
     const showBulkAddModal = () => {
       showAddMachineDropdown.value = false
       showBulkAddModalState.value = true
+      bulkAddModalPosition.value = { top: 0, left: 0 }
       clearSelectedFile()
     }
     
     const closeBulkAddModal = () => {
       showBulkAddModalState.value = false
+      bulkAddModalPosition.value = { top: 0, left: 0 }
       clearSelectedFile()
       isDragOver.value = false
     }
@@ -4183,8 +4371,7 @@ export default {
     }
     
     const downloadSampleCSV = () => {
-      // Placeholder: Will be implemented after CSV format is finalized
-      const sampleContent = 'Column 1,Column 2,Column 3\nSample data 1,Sample data 2,Sample data 3\nSample data 1,Sample data 2,Sample data 3'
+      const sampleContent = 'hostname,architecture,mac_address,power_type,commission,description,power_driver,power_boot_type,power_address,power_user,power_pass,k_g,cipher_suite_id,privilege_level,workaround_flags,power_mac_address\ntest-vm-00,amd64,aa:bb:cc:dd:ee:ff,ipmi,true,test 00,LAN_2_0,auto,172.29.244.51,ADMIN,ADMIN,,3,OPERATOR,opensesspriv,08:00:27:11:34:28\ntest-vm-01,amd64,aa:bb:cc:dd:ee:fe,manual,false,test 01,,,,,,,,,,'
       const blob = new Blob([sampleContent], { type: 'text/csv' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -4196,16 +4383,293 @@ export default {
       window.URL.revokeObjectURL(url)
     }
     
-    const uploadBulkMachines = () => {
-      // Placeholder: Will be implemented after CSV format and backend are ready
+    // CSV Validation Modal drag handlers
+    const startDragValidationModal = (event) => {
+      if (event.button !== 0) return
+      isDraggingValidationModal.value = true
+      const modalElement = event.currentTarget.closest('.modal-content')
+      if (modalElement) {
+        const rect = modalElement.getBoundingClientRect()
+        validationDragStartPosition.value = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        }
+        if (!validationModalPosition.value.top && !validationModalPosition.value.left) {
+          const viewportWidth = window.innerWidth
+          const viewportHeight = window.innerHeight
+          const modalWidth = rect.width
+          const modalHeight = rect.height
+          validationModalPosition.value = {
+            top: (viewportHeight - modalHeight) / 2,
+            left: (viewportWidth - modalWidth) / 2
+          }
+        }
+      }
+      event.preventDefault()
+    }
+    
+    const onDragValidationModal = (event) => {
+      if (!isDraggingValidationModal.value) return
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const modalElement = document.querySelector('.validation-result-modal')
+      if (!modalElement) return
+      
+      const modalWidth = modalElement.offsetWidth
+      const modalHeight = modalElement.offsetHeight
+      
+      let newLeft = event.clientX - validationDragStartPosition.value.x
+      let newTop = event.clientY - validationDragStartPosition.value.y
+      
+      newLeft = Math.max(0, Math.min(newLeft, viewportWidth - modalWidth))
+      newTop = Math.max(0, Math.min(newTop, viewportHeight - modalHeight))
+      
+      validationModalPosition.value = {
+        left: newLeft,
+        top: newTop
+      }
+    }
+    
+    const stopDragValidationModal = () => {
+      isDraggingValidationModal.value = false
+    }
+    
+    watch(isDraggingValidationModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragValidationModal)
+        document.addEventListener('mouseup', stopDragValidationModal)
+      } else {
+        document.removeEventListener('mousemove', onDragValidationModal)
+        document.removeEventListener('mouseup', stopDragValidationModal)
+      }
+    })
+    
+    // Validate MAC address format
+    const isValidMacAddress = (mac) => {
+      if (!mac || typeof mac !== 'string') return false
+      const cleaned = mac.replace(/:/g, '').replace(/-/g, '')
+      return /^[0-9A-Fa-f]{12}$/.test(cleaned)
+    }
+    
+    // Parse CSV file
+    const parseCSV = async (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          try {
+            const text = e.target.result
+            const lines = text.split('\n').filter(line => line.trim())
+            if (lines.length < 2) {
+              reject(new Error('CSV file must have at least a header row and one data row'))
+              return
+            }
+            
+            const header = lines[0].split(',').map(h => h.trim())
+            const expectedHeader = ['hostname', 'architecture', 'mac_address', 'power_type', 'commission', 'description', 'power_driver', 'power_boot_type', 'power_address', 'power_user', 'power_pass', 'k_g', 'cipher_suite_id', 'privilege_level', 'workaround_flags', 'power_mac_address']
+            
+            // Check if header matches expected format (allow extra columns)
+            const minRequiredColumns = expectedHeader.length
+            if (header.length < minRequiredColumns) {
+              reject(new Error(`CSV header must have at least ${minRequiredColumns} columns`))
+              return
+            }
+            
+            const data = []
+            for (let i = 1; i < lines.length; i++) {
+              const line = lines[i]
+              const values = []
+              let currentValue = ''
+              let inQuotes = false
+              
+              // Parse CSV line handling quoted values
+              for (let j = 0; j < line.length; j++) {
+                const char = line[j]
+                if (char === '"') {
+                  inQuotes = !inQuotes
+                } else if (char === ',' && !inQuotes) {
+                  values.push(currentValue.trim())
+                  currentValue = ''
+                } else {
+                  currentValue += char
+                }
+              }
+              values.push(currentValue.trim())
+              
+              // Check if comma count is sufficient (at least minRequiredColumns - 1 commas)
+              if (values.length < minRequiredColumns) {
+                data.push({
+                  row: i + 1,
+                  values: values,
+                  error: `Insufficient columns: expected at least ${minRequiredColumns}, found ${values.length}`
+                })
+                continue
+              }
+              
+              const row = {}
+              expectedHeader.forEach((key, index) => {
+                row[key] = values[index] || ''
+              })
+              row._rowNumber = i + 1
+              data.push(row)
+            }
+            
+            resolve({ header, data })
+          } catch (error) {
+            reject(error)
+          }
+        }
+        reader.onerror = () => reject(new Error('Failed to read CSV file'))
+        reader.readAsText(file)
+      })
+    }
+    
+    // Validate CSV data
+    const validateCSV = async () => {
       if (!selectedCsvFile.value) return
+      
       uploadingBulkMachines.value = true
       
-      // TODO: Implement CSV parsing and bulk upload
-      setTimeout(() => {
-        alert('Bulk upload functionality will be implemented after CSV format is finalized.')
+      try {
+        const { header, data } = await parseCSV(selectedCsvFile.value)
+        
+        const errors = []
+        const warnings = []
+        const validRows = []
+        const hostnameSet = new Set()
+        const macAddressSet = new Set()
+        
+        data.forEach((row) => {
+          const rowErrors = []
+          const rowWarnings = []
+          
+          // Check for parsing errors
+          if (row.error) {
+            rowErrors.push(row.error)
+            errors.push({
+              row: row.row || row._rowNumber,
+              message: row.error
+            })
+            return
+          }
+          
+          const rowNum = row._rowNumber
+          
+          // Validate required fields
+          if (!row.hostname || !row.hostname.trim()) {
+            rowErrors.push('hostname is required')
+          }
+          if (!row.architecture || !row.architecture.trim()) {
+            rowErrors.push('architecture is required')
+          }
+          if (!row.mac_address || !row.mac_address.trim()) {
+            rowErrors.push('mac_address is required')
+          }
+          if (!row.power_type || !row.power_type.trim()) {
+            rowErrors.push('power_type is required')
+          }
+          if (row.commission === undefined || row.commission === null || row.commission === '') {
+            rowErrors.push('commission is required')
+          }
+          
+          // Validate power_type
+          const powerType = (row.power_type || '').toLowerCase().trim()
+          if (powerType && powerType !== 'ipmi' && powerType !== 'manual') {
+            rowErrors.push(`power_type must be 'ipmi' or 'manual', found: '${row.power_type}'`)
+          }
+          
+          // Validate MAC address format
+          if (row.mac_address && row.mac_address.trim()) {
+            if (!isValidMacAddress(row.mac_address)) {
+              rowErrors.push(`Invalid MAC address format: '${row.mac_address}'`)
+            }
+          }
+          
+          // Check for duplicate hostname
+          if (row.hostname && row.hostname.trim()) {
+            const hostname = row.hostname.trim().toLowerCase()
+            if (hostnameSet.has(hostname)) {
+              rowErrors.push(`Duplicate hostname: '${row.hostname}'`)
+            } else {
+              hostnameSet.add(hostname)
+            }
+          }
+          
+          // Check for duplicate MAC address
+          if (row.mac_address && row.mac_address.trim()) {
+            const mac = row.mac_address.replace(/:/g, '').replace(/-/g, '').toLowerCase()
+            if (macAddressSet.has(mac)) {
+              rowErrors.push(`Duplicate MAC address: '${row.mac_address}'`)
+            } else {
+              macAddressSet.add(mac)
+            }
+          }
+          
+          // Validate IPMI required fields when power_type is ipmi
+          if (powerType === 'ipmi') {
+            if (!row.power_driver || !row.power_driver.trim()) {
+              rowErrors.push('power_driver is required when power_type is ipmi')
+            }
+            if (!row.power_boot_type || !row.power_boot_type.trim()) {
+              rowErrors.push('power_boot_type is required when power_type is ipmi')
+            }
+            if (!row.power_address || !row.power_address.trim()) {
+              rowErrors.push('power_address is required when power_type is ipmi')
+            }
+            if (!row.power_user || !row.power_user.trim()) {
+              rowErrors.push('power_user is required when power_type is ipmi')
+            }
+            if (!row.power_pass || !row.power_pass.trim()) {
+              rowErrors.push('power_pass is required when power_type is ipmi')
+            }
+          }
+          
+          if (rowErrors.length > 0) {
+            errors.push({
+              row: rowNum,
+              message: rowErrors.join('; ')
+            })
+          } else {
+            validRows.push(rowNum)
+          }
+        })
+        
+        const result = {
+          totalRows: data.length,
+          validRows: validRows.length,
+          errorRows: errors.length,
+          errors: errors,
+          warnings: warnings,
+          isValid: errors.length === 0
+        }
+        
+        csvValidationResult.value = result
+        showValidationModal.value = true
+        validationModalPosition.value = { top: 0, left: 0 }
+        
+      } catch (error) {
+        csvValidationResult.value = {
+          totalRows: 0,
+          validRows: 0,
+          errorRows: 0,
+          errors: [{ row: 0, message: error.message }],
+          warnings: [],
+          isValid: false
+        }
+        showValidationModal.value = true
+        validationModalPosition.value = { top: 0, left: 0 }
+      } finally {
         uploadingBulkMachines.value = false
-      }, 1000)
+      }
+    }
+    
+    const closeValidationModal = () => {
+      showValidationModal.value = false
+      validationModalPosition.value = { top: 0, left: 0 }
+    }
+    
+    const uploadBulkMachines = () => {
+      validateCSV()
     }
     
     const resetNewMachineForm = () => {
@@ -7237,6 +7701,9 @@ export default {
         csvFileInput,
         isDragOver,
         uploadingBulkMachines,
+        isDraggingBulkAddModal,
+        bulkAddModalPosition,
+        startDragBulkAddModal,
         showBulkAddModal,
         closeBulkAddModal,
         triggerFileInput,
@@ -7246,6 +7713,13 @@ export default {
         formatFileSize,
         downloadSampleCSV,
         uploadBulkMachines,
+        validateCSV,
+        showValidationModal,
+        csvValidationResult,
+        isDraggingValidationModal,
+        validationModalPosition,
+        startDragValidationModal,
+        closeValidationModal,
         validateMacAddress,
         addMachine,
         // Commission Machine
@@ -8501,6 +8975,112 @@ export default {
   padding: 1.5rem;
 }
 
+.validation-result-modal {
+  max-width: 700px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.validation-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+}
+
+.summary-item.success .summary-value {
+  color: #28a745;
+}
+
+.summary-item.error .summary-value {
+  color: #dc3545;
+}
+
+.summary-label {
+  font-weight: 500;
+  color: #333;
+}
+
+.summary-value {
+  color: #666;
+}
+
+.validation-errors,
+.validation-warnings {
+  margin-top: 1.5rem;
+}
+
+.validation-errors h4,
+.validation-warnings h4 {
+  margin-bottom: 0.75rem;
+  color: #333;
+  font-size: 1rem;
+}
+
+.validation-errors h4 {
+  color: #dc3545;
+}
+
+.validation-warnings h4 {
+  color: #ffc107;
+}
+
+.error-list,
+.warning-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.error-item,
+.warning-item {
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.error-item {
+  background-color: #fff5f5;
+  border-left: 3px solid #dc3545;
+}
+
+.warning-item {
+  background-color: #fffbf0;
+  border-left: 3px solid #ffc107;
+}
+
+.error-row,
+.warning-row {
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
+.error-row {
+  color: #dc3545;
+}
+
+.warning-row {
+  color: #856404;
+}
+
+.error-message,
+.warning-message {
+  color: #666;
+}
+
 .sample-csv-section,
 .file-upload-section,
 .preview-section {
@@ -8545,8 +9125,13 @@ export default {
   overflow-x: auto;
 }
 
+.sample-csv-table {
+  overflow-x: auto;
+}
+
 .sample-csv-table table {
   width: 100%;
+  min-width: 1200px;
   border-collapse: collapse;
 }
 

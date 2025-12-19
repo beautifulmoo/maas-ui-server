@@ -582,9 +582,18 @@ MachinesTab.vue (실시간 UI 업데이트)
      - 백엔드 `/api/machines` POST 요청
      - 성공 시 머신 목록 새로고침
   4. **대량 등록 모드** (CSV):
-     - 샘플 CSV 파일 미리보기 또는 다운로드
+     - 샘플 CSV 파일 미리보기 및 다운로드
+       - CSV 헤더: hostname, architecture, mac_address, power_type, commission, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
+       - 예시 데이터 2개 행 제공 (IPMI 예시, Manual 예시)
      - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
-     - CSV 형식 검증 (향후 구현)
+     - CSV 파일 검증:
+       - 필수 필드 검증: hostname, architecture, mac_address, power_type, commission
+       - power_type이 'ipmi'인 경우 추가 필수 필드: power_driver, power_boot_type, power_address, power_user, power_pass
+       - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
+       - CSV 내 hostname 중복 검사
+       - CSV 내 mac_address 중복 검사
+       - 최소 필수 컬럼 수 검증 (컬럼이 부족하면 오류, 많으면 허용)
+       - 검증 결과 모달 표시 (전체/유효/오류 행 수, 오류 상세 목록)
      - CSV 파싱 및 미리보기 (향후 구현)
      - 대량 등록 처리 (향후 구현)
 - **UI/UX 특징**:
@@ -596,16 +605,28 @@ MachinesTab.vue (실시간 UI 업데이트)
     - 모달 드래그 가능 (헤더를 드래그하여 이동)
     - 모달 바깥쪽 클릭 시 닫히지 않음 (Cancel 또는 X 버튼으로만 닫힘)
   - 대량 등록 모달:
-    - 샘플 CSV 미리보기 테이블
-    - 샘플 CSV 다운로드 버튼
+    - 샘플 CSV 미리보기 테이블 (실제 CSV 형식에 맞춘 16개 컬럼 표시)
+    - 샘플 CSV 다운로드 버튼 (실제 형식의 CSV 파일 다운로드)
     - 파일 업로드 영역 (드래그 앤 드롭 지원)
     - 선택된 파일 정보 표시 (이름, 크기)
     - 모달 드래그 가능
     - 모달 바깥쪽 클릭 시 닫히지 않음
+  - 검증 결과 모달:
+    - 검증 상태 요약 (전체/유효/오류 행 수)
+    - 오류 목록 (행 번호별 상세 오류 메시지)
+    - 경고 목록 (향후 확장용)
+    - 모달 드래그 가능
+    - 성공/오류 상태에 따른 색상 구분
 - **에러 처리**:
   - MAC 주소 형식 오류 검증
   - API 오류 메시지 표시
-  - CSV 형식 오류 검증 (향후 구현)
+  - CSV 검증 오류 처리:
+    - 필수 필드 누락 검증
+    - power_type별 필수 필드 검증
+    - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
+    - CSV 내 중복 값 검증 (hostname, mac_address)
+    - 컬럼 수 부족 검증
+    - 검증 결과를 모달로 상세 표시
 
 #### 기능명: 머신 커미셔닝 (Commission)
 - **설명**: 머신을 커미셔닝하여 하드웨어 정보 수집 및 설정
@@ -2510,8 +2531,17 @@ maas.default.api-key=consumer_key:token:token_secret
    - 성공 시 모달 닫기 및 머신 목록 새로고침
 4. **대량 등록 모드** (CSV):
    - 샘플 CSV 파일 확인 또는 다운로드
-   - CSV 파일 업로드
-   - CSV 파싱 및 검증 (향후 구현)
+     - CSV 헤더: hostname, architecture, mac_address, power_type, commission, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
+     - 예시 데이터 2개 행 (IPMI 예시, Manual 예시)
+   - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
+   - CSV 파일 검증:
+     - 필수 필드 검증 (hostname, architecture, mac_address, power_type, commission)
+     - power_type이 'ipmi'인 경우 추가 필수 필드 검증
+     - MAC 주소 형식 검증
+     - CSV 내 중복 값 검증 (hostname, mac_address)
+     - 컬럼 수 검증
+     - 검증 결과 모달 표시
+   - CSV 파싱 및 미리보기 (향후 구현)
    - 대량 등록 처리 (향후 구현)
 
 #### 커미셔닝 흐름
