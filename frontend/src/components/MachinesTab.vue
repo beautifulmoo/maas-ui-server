@@ -2276,11 +2276,11 @@
           <button 
             type="button" 
             class="btn-primary" 
-            :disabled="!selectedCsvFile || uploadingBulkMachines"
+            :disabled="!selectedCsvFile || uploadingBulkMachines || validationFailed"
             @click="uploadBulkMachines"
           >
             <span v-if="uploadingBulkMachines">Processing...</span>
-            <span v-else>Upload & Process</span>
+            <span v-else>{{ bulkAddButtonText }}</span>
           </button>
         </div>
       </div>
@@ -2303,8 +2303,8 @@
         </div>
         
         <div class="modal-body" v-if="csvValidationResult">
-          <div class="validation-summary">
-            <div class="summary-item" :class="{ 'success': csvValidationResult.isValid, 'error': !csvValidationResult.isValid }">
+          <div class="validation-summary" :class="{ 'has-error': csvValidationResult.errorRows > 0 }">
+            <div class="summary-item" :class="{ 'summary-success': csvValidationResult.isValid, 'summary-error': !csvValidationResult.isValid }">
               <span class="summary-label">Status:</span>
               <span class="summary-value">
                 <strong v-if="csvValidationResult.isValid">✓ All rows are valid</strong>
@@ -2315,11 +2315,11 @@
               <span class="summary-label">Total Rows:</span>
               <span class="summary-value">{{ csvValidationResult.totalRows }}</span>
             </div>
-            <div class="summary-item" :class="{ 'success': csvValidationResult.validRows > 0 }">
+            <div class="summary-item" :class="{ 'summary-success': csvValidationResult.validRows > 0 }">
               <span class="summary-label">Valid Rows:</span>
               <span class="summary-value">{{ csvValidationResult.validRows }}</span>
             </div>
-            <div class="summary-item" :class="{ 'error': csvValidationResult.errorRows > 0 }">
+            <div class="summary-item" :class="{ 'summary-error': csvValidationResult.errorRows > 0 }">
               <span class="summary-label">Error Rows:</span>
               <span class="summary-value">{{ csvValidationResult.errorRows }}</span>
             </div>
@@ -2422,7 +2422,9 @@ export default {
     const csvValidationResult = ref(null)
     const isDraggingValidationModal = ref(false)
     const validationModalPosition = ref({ top: 0, left: 0 })
+    const bulkAddButtonText = ref('Validate')
     const validationDragStartPosition = ref({ x: 0, y: 0 })
+    const validationFailed = ref(false) // Validate 실패 시 버튼 disable을 위한 플래그
     
     const newMachine = ref({
       hostname: '',
@@ -4318,6 +4320,8 @@ export default {
       showBulkAddModalState.value = true
       bulkAddModalPosition.value = { top: 0, left: 0 }
       clearSelectedFile()
+      bulkAddButtonText.value = 'Validate' // 모달 열 때 버튼 텍스트 초기화
+      validationFailed.value = false // 모달 열 때 플래그 초기화
     }
     
     const closeBulkAddModal = () => {
@@ -4325,6 +4329,8 @@ export default {
       bulkAddModalPosition.value = { top: 0, left: 0 }
       clearSelectedFile()
       isDragOver.value = false
+      bulkAddButtonText.value = 'Validate' // 모달 닫을 때 버튼 텍스트 초기화
+      validationFailed.value = false // 모달 닫을 때 플래그 초기화
     }
     
     const triggerFileInput = () => {
@@ -4336,6 +4342,8 @@ export default {
       if (file) {
         if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
           selectedCsvFile.value = file
+          validationFailed.value = false // 새 CSV 파일 선택 시 플래그 리셋
+          bulkAddButtonText.value = 'Validate' // 버튼 텍스트를 Validate로 초기화
         } else {
           alert('Please select a CSV file')
         }
@@ -4349,6 +4357,8 @@ export default {
       if (file) {
         if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
           selectedCsvFile.value = file
+          validationFailed.value = false // 새 CSV 파일 선택 시 플래그 리셋
+          bulkAddButtonText.value = 'Validate' // 버튼 텍스트를 Validate로 초기화
         } else {
           alert('Please drop a CSV file')
         }
@@ -4666,9 +4676,25 @@ export default {
     const closeValidationModal = () => {
       showValidationModal.value = false
       validationModalPosition.value = { top: 0, left: 0 }
+      // 검증 성공 시 버튼 텍스트를 "Upload & Process"로 변경
+      if (csvValidationResult.value && csvValidationResult.value.isValid) {
+        bulkAddButtonText.value = 'Upload & Process'
+        validationFailed.value = false // 검증 성공 시 플래그 리셋
+      } else if (csvValidationResult.value && !csvValidationResult.value.isValid) {
+        // 검증 실패 시 CSV 파일 삭제 및 버튼 disable
+        clearSelectedFile()
+        validationFailed.value = true
+        bulkAddButtonText.value = 'Validate' // 버튼 텍스트를 Validate로 유지
+      }
     }
     
-    const uploadBulkMachines = () => {
+    const uploadBulkMachines = async () => {
+      // 버튼 텍스트가 "Upload & Process"일 때는 미구현 팝업 표시
+      if (bulkAddButtonText.value === 'Upload & Process') {
+        await customAlert('이 기능은 아직 구현되지 않았습니다.', '미구현')
+        return
+      }
+      // "Validate"일 때는 검증 실행
       validateCSV()
     }
     
@@ -7720,6 +7746,7 @@ export default {
         validationModalPosition,
         startDragValidationModal,
         closeValidationModal,
+        bulkAddButtonText,
         validateMacAddress,
         addMachine,
         // Commission Machine
@@ -8984,26 +9011,56 @@ export default {
 .validation-summary {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
-  padding: 1rem;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
   background-color: #f8f9fa;
   border-radius: 6px;
+}
+
+.validation-summary.has-error {
+  background-color: #f8f9fa !important;
 }
 
 .summary-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
 }
 
-.summary-item.success .summary-value {
+.summary-value {
+  text-align: right;
+  min-width: 3rem;
+}
+
+/* Summary item success/error styles - consolidated */
+.summary-item.summary-success .summary-value {
   color: #28a745;
 }
 
-.summary-item.error .summary-value {
+/* Summary item error styles - consolidated */
+.summary-item.summary-error {
   color: #dc3545;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+}
+
+.summary-item.summary-error .summary-value {
+  color: #dc3545 !important;
+}
+
+.summary-item.summary-error .summary-value strong {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  font-weight: 600;
+  background-color: transparent;
+}
+
+.summary-item.summary-error .summary-value:has(strong) {
+  padding: 0.0625rem 0.5rem !important;
 }
 
 .summary-label {
@@ -9013,6 +9070,8 @@ export default {
 
 .summary-value {
   color: #666;
+  text-align: right;
+  min-width: 3rem;
 }
 
 .validation-errors,

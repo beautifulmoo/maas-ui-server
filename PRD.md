@@ -594,6 +594,11 @@ MachinesTab.vue (실시간 UI 업데이트)
        - CSV 내 mac_address 중복 검사
        - 최소 필수 컬럼 수 검증 (컬럼이 부족하면 오류, 많으면 허용)
        - 검증 결과 모달 표시 (전체/유효/오류 행 수, 오류 상세 목록)
+     - 버튼 동작:
+       - 초기 버튼 텍스트: "Validate"
+       - 검증 성공 시: 검증 결과 모달 닫을 때 버튼 텍스트가 "Upload & Process"로 변경
+       - 검증 실패 시: 선택된 CSV 파일 삭제, 버튼 텍스트는 "Validate"로 유지, 버튼 비활성화 (새 CSV 파일 선택 시까지)
+       - "Upload & Process" 버튼 클릭 시: 미구현 팝업 표시 ("이 기능은 아직 구현되지 않았습니다.")
      - CSV 파싱 및 미리보기 (향후 구현)
      - 대량 등록 처리 (향후 구현)
 - **UI/UX 특징**:
@@ -611,6 +616,11 @@ MachinesTab.vue (실시간 UI 업데이트)
     - 선택된 파일 정보 표시 (이름, 크기)
     - 모달 드래그 가능
     - 모달 바깥쪽 클릭 시 닫히지 않음
+    - 하단 버튼:
+      - "Validate" 버튼: CSV 파일 검증 실행 (파일 선택 시 활성화)
+      - 검증 성공 시 "Upload & Process" 버튼으로 변경
+      - 검증 실패 시 CSV 파일 삭제 및 버튼 비활성화 (새 파일 선택 시까지)
+      - "Upload & Process" 버튼 클릭 시 미구현 팝업 표시
   - 검증 결과 모달:
     - 검증 상태 요약 (전체/유효/오류 행 수)
     - 오류 목록 (행 번호별 상세 오류 메시지)
@@ -627,6 +637,8 @@ MachinesTab.vue (실시간 UI 업데이트)
     - CSV 내 중복 값 검증 (hostname, mac_address)
     - 컬럼 수 부족 검증
     - 검증 결과를 모달로 상세 표시
+    - 검증 실패 시: 선택된 CSV 파일 자동 삭제, "Validate" 버튼 비활성화 (새 CSV 파일 선택 시까지)
+    - 검증 성공 후 "Upload & Process" 버튼 클릭 시: 미구현 팝업 표시
 
 #### 기능명: 머신 커미셔닝 (Commission)
 - **설명**: 머신을 커미셔닝하여 하드웨어 정보 수집 및 설정
@@ -2534,13 +2546,19 @@ maas.default.api-key=consumer_key:token:token_secret
      - CSV 헤더: hostname, architecture, mac_address, power_type, commission, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
      - 예시 데이터 2개 행 (IPMI 예시, Manual 예시)
    - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
-   - CSV 파일 검증:
+   - "Validate" 버튼 클릭하여 CSV 파일 검증:
      - 필수 필드 검증 (hostname, architecture, mac_address, power_type, commission)
      - power_type이 'ipmi'인 경우 추가 필수 필드 검증
      - MAC 주소 형식 검증
      - CSV 내 중복 값 검증 (hostname, mac_address)
      - 컬럼 수 검증
      - 검증 결과 모달 표시
+   - 검증 성공 시:
+     - 검증 결과 모달 닫을 때 버튼 텍스트가 "Upload & Process"로 변경
+     - "Upload & Process" 버튼 클릭 시 미구현 팝업 표시 ("이 기능은 아직 구현되지 않았습니다.")
+   - 검증 실패 시:
+     - 선택된 CSV 파일 자동 삭제
+     - "Validate" 버튼 비활성화 (새 CSV 파일 선택 시까지)
    - CSV 파싱 및 미리보기 (향후 구현)
    - 대량 등록 처리 (향후 구현)
 
