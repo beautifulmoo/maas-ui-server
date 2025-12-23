@@ -396,19 +396,51 @@
           Showing {{ (currentPage - 1) * itemsPerPage + 1 }}-{{ Math.min(currentPage * itemsPerPage, filteredMachines.length) }} of {{ filteredMachines.length }} machines ({{ machines.length }} total)
           </div>
       <div class="pagination-controls">
-        <button class="btn-small" :disabled="currentPage === 1" @click="currentPage = 1">
-          &lt; Page {{ currentPage }} of {{ totalPages }} &gt;
+        <button 
+          class="btn-small" 
+          :disabled="currentPage === 1" 
+          @click="currentPage = 1"
+          title="First page"
+        >
+          &lt;&lt;
+        </button>
+        <button 
+          class="btn-small" 
+          :disabled="currentPage === 1" 
+          @click="currentPage = Math.max(1, currentPage - 1)"
+          title="Previous page"
+        >
+          &lt;
+        </button>
+        <span class="page-info">
+          Page {{ currentPage }} of {{ totalPages }}
+        </span>
+        <button 
+          class="btn-small" 
+          :disabled="currentPage >= totalPages" 
+          @click="currentPage = Math.min(totalPages, currentPage + 1)"
+          title="Next page"
+        >
+          &gt;
+        </button>
+        <button 
+          class="btn-small" 
+          :disabled="currentPage >= totalPages" 
+          @click="currentPage = totalPages"
+          title="Last page"
+        >
+          &gt;&gt;
         </button>
         <select v-model="itemsPerPage" class="page-size-select">
-            <option value="10">10/page</option>
+          <option value="10">10/page</option>
           <option value="25">25/page</option>
           <option value="50">50/page</option>
           <option value="100">100/page</option>
         </select>
-        </div>
       </div>
     </div>
     <!-- End of content-area -->
+    </div>
     
     <!-- Confirmation Modal -->
     <Teleport to="body">
@@ -2287,72 +2319,159 @@
     </div>
     
     <!-- CSV Validation Result Modal -->
-    <div v-if="showValidationModal" class="modal-overlay" @click="closeValidationModal">
-      <div 
-        class="modal-content validation-result-modal" 
-        @click.stop
-        :style="(validationModalPosition?.top || validationModalPosition?.left) ? { position: 'fixed', top: (validationModalPosition?.top || 0) + 'px', left: (validationModalPosition?.left || 0) + 'px', margin: 0 } : {}"
-      >
+    <Teleport to="body">
+      <div v-if="showValidationModal" class="modal-overlay" @click="closeValidationModal">
         <div 
-          class="modal-header modal-draggable-header" 
-          @mousedown="startDragValidationModal"
-          :style="isDraggingValidationModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          class="modal-content validation-result-modal" 
+          @click.stop
+          :style="(validationModalPosition?.top || validationModalPosition?.left) ? { position: 'fixed', top: (validationModalPosition?.top || 0) + 'px', left: (validationModalPosition?.left || 0) + 'px', margin: 0 } : {}"
         >
-          <h3>CSV Validation Result</h3>
-          <button class="close-btn" @click="closeValidationModal">&times;</button>
-        </div>
-        
-        <div class="modal-body" v-if="csvValidationResult">
-          <div class="validation-summary" :class="{ 'has-error': csvValidationResult.errorRows > 0 }">
-            <div class="summary-item" :class="{ 'summary-success': csvValidationResult.isValid, 'summary-error': !csvValidationResult.isValid }">
-              <span class="summary-label">Status:</span>
-              <span class="summary-value">
-                <strong v-if="csvValidationResult.isValid">✓ All rows are valid</strong>
-                <strong v-else>✗ Validation failed</strong>
-              </span>
-            </div>
-            <div class="summary-item">
-              <span class="summary-label">Total Rows:</span>
-              <span class="summary-value">{{ csvValidationResult.totalRows }}</span>
-            </div>
-            <div class="summary-item" :class="{ 'summary-success': csvValidationResult.validRows > 0 }">
-              <span class="summary-label">Valid Rows:</span>
-              <span class="summary-value">{{ csvValidationResult.validRows }}</span>
-            </div>
-            <div class="summary-item" :class="{ 'summary-error': csvValidationResult.errorRows > 0 }">
-              <span class="summary-label">Error Rows:</span>
-              <span class="summary-value">{{ csvValidationResult.errorRows }}</span>
-            </div>
+          <div 
+            class="modal-header modal-draggable-header" 
+            @mousedown="startDragValidationModal"
+            :style="isDraggingValidationModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          >
+            <h3>CSV Validation Result</h3>
+            <button class="close-btn" @click="closeValidationModal">&times;</button>
           </div>
           
-          <div v-if="csvValidationResult.errors && csvValidationResult.errors.length > 0" class="validation-errors">
-            <h4>Errors:</h4>
-            <div class="error-list">
-              <div v-for="(error, index) in csvValidationResult.errors" :key="index" class="error-item">
-                <span class="error-row">Row {{ error.row }}:</span>
-                <span class="error-message">{{ error.message }}</span>
+          <div class="modal-body" v-if="csvValidationResult">
+            <div class="validation-summary" :class="{ 'has-error': csvValidationResult.errorRows > 0 }">
+              <div class="summary-item" :class="{ 'summary-success': csvValidationResult.isValid, 'summary-error': !csvValidationResult.isValid }">
+                <span class="summary-label">Status:</span>
+                <span class="summary-value">
+                  <strong v-if="csvValidationResult.isValid">✓ All rows are valid</strong>
+                  <strong v-else>✗ Validation failed</strong>
+                </span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Total Rows:</span>
+                <span class="summary-value">{{ csvValidationResult.totalRows }}</span>
+              </div>
+              <div class="summary-item" :class="{ 'summary-success': csvValidationResult.validRows > 0 }">
+                <span class="summary-label">Valid Rows:</span>
+                <span class="summary-value">{{ csvValidationResult.validRows }}</span>
+              </div>
+              <div class="summary-item" :class="{ 'summary-error': csvValidationResult.errorRows > 0 }">
+                <span class="summary-label">Error Rows:</span>
+                <span class="summary-value">{{ csvValidationResult.errorRows }}</span>
+              </div>
+            </div>
+            
+            <div v-if="csvValidationResult.errors && csvValidationResult.errors.length > 0" class="validation-errors">
+              <h4>Errors:</h4>
+              <div class="error-list">
+                <div v-for="(error, index) in csvValidationResult.errors" :key="index" class="error-item">
+                  <span class="error-row">Row {{ error.row }}:</span>
+                  <span class="error-message">{{ error.message }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div v-if="csvValidationResult.warnings && csvValidationResult.warnings.length > 0" class="validation-warnings">
+              <h4>Warnings:</h4>
+              <div class="warning-list">
+                <div v-for="(warning, index) in csvValidationResult.warnings" :key="index" class="warning-item">
+                  <span class="warning-row">Row {{ warning.row }}:</span>
+                  <span class="warning-message">{{ warning.message }}</span>
+                </div>
               </div>
             </div>
           </div>
           
-          <div v-if="csvValidationResult.warnings && csvValidationResult.warnings.length > 0" class="validation-warnings">
-            <h4>Warnings:</h4>
-            <div class="warning-list">
-              <div v-for="(warning, index) in csvValidationResult.warnings" :key="index" class="warning-item">
-                <span class="warning-row">Row {{ warning.row }}:</span>
-                <span class="warning-message">{{ warning.message }}</span>
-              </div>
-            </div>
+          <div class="modal-actions">
+            <button type="button" class="btn-primary" @click="closeValidationModal">
+              Close
+            </button>
           </div>
-        </div>
-        
-        <div class="modal-actions">
-          <button type="button" class="btn-primary" @click="closeValidationModal">
-            Close
-          </button>
         </div>
       </div>
-    </div>
+    </Teleport>
+    
+    <!-- Bulk Upload Progress Modal -->
+    <Teleport to="body">
+      <div v-if="showBulkUploadProgress" class="modal-overlay" @click.self="() => {}">
+        <div 
+          class="modal-content"
+          :style="(bulkUploadProgressPosition?.top || bulkUploadProgressPosition?.left) ? { position: 'fixed', top: (bulkUploadProgressPosition?.top || 0) + 'px', left: (bulkUploadProgressPosition?.left || 0) + 'px', margin: 0 } : {}"
+        >
+          <div 
+            class="modal-header modal-draggable-header" 
+            @mousedown="startDragBulkUploadProgressModal"
+            :style="isDraggingBulkUploadProgressModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
+          >
+            <h3>Bulk Machine Upload Progress</h3>
+            <button 
+              v-if="!bulkUploadInProgress" 
+              class="close-btn" 
+              @click="closeBulkUploadProgressModal"
+            >&times;</button>
+          </div>
+          
+          <div class="modal-body">
+            <div v-if="bulkUploadInProgress" class="upload-progress">
+              <div class="progress-info">
+                <p>Processing: Row {{ bulkUploadCurrentRow }} of {{ bulkUploadTotalRows }}</p>
+                <p class="current-machine">{{ bulkUploadCurrentMachine }}</p>
+              </div>
+              <div class="progress-bar-container">
+                <div 
+                  class="progress-bar" 
+                  :style="{ width: bulkUploadProgressPercent + '%' }"
+                ></div>
+              </div>
+              <p class="progress-text">{{ bulkUploadProgressPercent.toFixed(0) }}%</p>
+            </div>
+            
+            <div v-else class="upload-result">
+              <div class="result-summary">
+                <div class="summary-item" :class="{ 'summary-success': bulkUploadResult.successCount > 0, 'summary-error': bulkUploadResult.failedCount > 0 }">
+                  <span class="summary-label">Status:</span>
+                  <span class="summary-value">
+                    <strong v-if="bulkUploadResult.failedCount === 0">✓ All machines added successfully</strong>
+                    <strong v-else-if="bulkUploadResult.successCount === 0">✗ All machines failed</strong>
+                    <strong v-else>⚠ Partial success</strong>
+                  </span>
+                </div>
+                <div class="summary-item">
+                  <span class="summary-label">Total:</span>
+                  <span class="summary-value">{{ bulkUploadTotalRows }}</span>
+                </div>
+                <div class="summary-item summary-success">
+                  <span class="summary-label">Success:</span>
+                  <span class="summary-value">{{ bulkUploadResult.successCount }}</span>
+                </div>
+                <div class="summary-item" :class="{ 'summary-error': bulkUploadResult.failedCount > 0 }">
+                  <span class="summary-label">Failed:</span>
+                  <span class="summary-value">{{ bulkUploadResult.failedCount }}</span>
+                </div>
+              </div>
+              
+              <div v-if="bulkUploadResult.errors && bulkUploadResult.errors.length > 0" class="upload-errors">
+                <h4>Errors:</h4>
+                <div class="error-list">
+                  <div v-for="(error, index) in bulkUploadResult.errors" :key="index" class="error-item">
+                    <span class="error-row">Row {{ error.row }} ({{ error.hostname }}):</span>
+                    <span class="error-message">{{ error.message }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="modal-actions">
+            <button 
+              v-if="!bulkUploadInProgress" 
+              type="button" 
+              class="btn-primary" 
+              @click="closeBulkUploadProgressModal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -2425,6 +2544,25 @@ export default {
     const bulkAddButtonText = ref('Validate')
     const validationDragStartPosition = ref({ x: 0, y: 0 })
     const validationFailed = ref(false) // Validate 실패 시 버튼 disable을 위한 플래그
+    
+    // Bulk upload progress
+    const showBulkUploadProgress = ref(false)
+    const bulkUploadInProgress = ref(false)
+    const bulkUploadCurrentRow = ref(0)
+    const bulkUploadTotalRows = ref(0)
+    const bulkUploadCurrentMachine = ref('')
+    const bulkUploadProgressPercent = ref(0)
+    const bulkUploadResult = ref({
+      successCount: 0,
+      failedCount: 0,
+      errors: []
+    })
+    const bulkUploadProgressPosition = ref({ top: 0, left: 0 })
+    const isDraggingBulkUploadProgressModal = ref(false)
+    const bulkUploadProgressDragStart = ref({ x: 0, y: 0 })
+    
+    // Store validated CSV data for processing
+    const validatedCsvData = ref(null)
     
     const newMachine = ref({
       hostname: '',
@@ -2543,6 +2681,41 @@ export default {
     }
     
     // Power Menu Functions
+    const toggleDeployMenu = (machineId, event) => {
+      if (openDeployMenu.value === machineId) {
+        openDeployMenu.value = null
+        deployMenuPosition.value = { top: 0, left: 0 }
+      } else {
+        // Power 메뉴가 열려있으면 닫기
+        if (openPowerMenu.value === machineId) {
+          openPowerMenu.value = null
+          powerMenuPosition.value = { top: 0, left: 0 }
+        }
+        
+        // nextTick을 사용하여 DOM이 완전히 렌더링된 후 위치 계산
+        nextTick(() => {
+          const targetElement = event?.currentTarget || event?.target
+          
+          if (targetElement) {
+            const containerRect = targetElement.getBoundingClientRect()
+            
+            if (containerRect && containerRect.width > 0 && containerRect.height > 0) {
+              // position: fixed를 사용하므로 viewport 기준 좌표 사용
+              deployMenuPosition.value = {
+                top: containerRect.bottom + 4,
+                left: containerRect.left
+              }
+              openDeployMenu.value = machineId
+            } else {
+              openDeployMenu.value = null
+            }
+          } else {
+            openDeployMenu.value = machineId
+          }
+        })
+      }
+    }
+    
     const togglePowerMenu = (machineId, event) => {
       if (openPowerMenu.value === machineId) {
         openPowerMenu.value = null
@@ -4370,6 +4543,9 @@ export default {
       if (csvFileInput.value) {
         csvFileInput.value.value = ''
       }
+      // 파일 제거 시 버튼 텍스트를 Validate로 리셋
+      bulkAddButtonText.value = 'Validate'
+      validationFailed.value = false
     }
     
     const formatFileSize = (bytes) => {
@@ -4455,6 +4631,67 @@ export default {
       }
     })
     
+    // Bulk Upload Progress Modal drag handlers
+    const startDragBulkUploadProgressModal = (event) => {
+      if (!bulkUploadProgressPosition.value.top && !bulkUploadProgressPosition.value.left) {
+        const modal = event.currentTarget.closest('.modal-content')
+        if (modal) {
+          const rect = modal.getBoundingClientRect()
+          bulkUploadProgressPosition.value = {
+            top: rect.top,
+            left: rect.left
+          }
+        }
+      }
+      isDraggingBulkUploadProgressModal.value = true
+      bulkUploadProgressDragStart.value = {
+        x: event.clientX - bulkUploadProgressPosition.value.left,
+        y: event.clientY - bulkUploadProgressPosition.value.top
+      }
+    }
+    
+    const onDragBulkUploadProgressModal = (event) => {
+      if (!isDraggingBulkUploadProgressModal.value) return
+      
+      const modal = document.querySelector('.modal-content')
+      if (!modal) return
+      
+      const maxX = window.innerWidth - modal.offsetWidth
+      const maxY = window.innerHeight - modal.offsetHeight
+      
+      let newX = event.clientX - bulkUploadProgressDragStart.value.x
+      let newY = event.clientY - bulkUploadProgressDragStart.value.y
+      
+      newX = Math.max(0, Math.min(newX, maxX))
+      newY = Math.max(0, Math.min(newY, maxY))
+      
+      bulkUploadProgressPosition.value = { top: newY, left: newX }
+    }
+    
+    const stopDragBulkUploadProgressModal = () => {
+      isDraggingBulkUploadProgressModal.value = false
+    }
+    
+    watch(isDraggingBulkUploadProgressModal, (dragging) => {
+      if (dragging) {
+        document.addEventListener('mousemove', onDragBulkUploadProgressModal)
+        document.addEventListener('mouseup', stopDragBulkUploadProgressModal)
+      } else {
+        document.removeEventListener('mousemove', onDragBulkUploadProgressModal)
+        document.removeEventListener('mouseup', stopDragBulkUploadProgressModal)
+      }
+    })
+    
+    const closeBulkUploadProgressModal = async () => {
+      showBulkUploadProgress.value = false
+      bulkUploadProgressPosition.value = { top: 0, left: 0 }
+      
+      // Reload machines list if upload was completed
+      if (!bulkUploadInProgress.value) {
+        await loadMachines()
+      }
+    }
+    
     // Validate MAC address format
     const isValidMacAddress = (mac) => {
       if (!mac || typeof mac !== 'string') return false
@@ -4534,6 +4771,76 @@ export default {
       })
     }
     
+    // Collect existing machine information for validation
+    const collectExistingMachineInfo = async () => {
+      const existingInfo = {
+        hostnames: new Set(),
+        macAddresses: new Set(),
+        powerAddresses: new Set(),
+        powerMacAddresses: new Set()
+      }
+      
+      // Collect hostnames and mac_addresses from existing machines
+      machines.value.forEach(machine => {
+        // Collect hostname
+        if (machine.hostname && machine.hostname.trim()) {
+          existingInfo.hostnames.add(machine.hostname.trim().toLowerCase())
+        }
+        
+        // Collect MAC addresses
+        if (machine.mac_addresses && Array.isArray(machine.mac_addresses)) {
+          machine.mac_addresses.forEach(mac => {
+            if (mac && mac.trim()) {
+              const normalizedMac = mac.replace(/:/g, '').replace(/-/g, '').toLowerCase()
+              existingInfo.macAddresses.add(normalizedMac)
+            }
+          })
+        }
+      })
+      
+      // Collect power_parameters from IPMI machines
+      const ipmiMachines = machines.value.filter(m => 
+        m.power_type && m.power_type.toLowerCase() === 'ipmi'
+      )
+      
+      if (ipmiMachines.length > 0) {
+        const apiParams = settingsStore.getApiParams.value
+        
+        // Load power_parameters for all IPMI machines in parallel
+        const powerParamsPromises = ipmiMachines.map(async (machine) => {
+          try {
+            const response = await axios.get(
+              `http://localhost:8081/api/machines/${machine.id}/power-parameters`,
+              { params: apiParams }
+            )
+            return { machineId: machine.id, powerParams: response.data }
+          } catch (err) {
+            console.warn(`Failed to load power parameters for machine ${machine.id}:`, err)
+            return { machineId: machine.id, powerParams: null }
+          }
+        })
+        
+        const powerParamsResults = await Promise.all(powerParamsPromises)
+        
+        powerParamsResults.forEach(({ powerParams }) => {
+          if (powerParams) {
+            // Collect power_address
+            if (powerParams.power_address && powerParams.power_address.trim()) {
+              existingInfo.powerAddresses.add(powerParams.power_address.trim().toLowerCase())
+            }
+            
+            // Collect power_mac_address
+            if (powerParams.mac_address && powerParams.mac_address.trim()) {
+              const normalizedMac = powerParams.mac_address.replace(/:/g, '').replace(/-/g, '').toLowerCase()
+              existingInfo.powerMacAddresses.add(normalizedMac)
+            }
+          }
+        })
+      }
+      
+      return existingInfo
+    }
+    
     // Validate CSV data
     const validateCSV = async () => {
       if (!selectedCsvFile.value) return
@@ -4549,6 +4856,7 @@ export default {
         const hostnameSet = new Set()
         const macAddressSet = new Set()
         
+        // Step 1: CSV file validation
         data.forEach((row) => {
           const rowErrors = []
           const rowWarnings = []
@@ -4595,7 +4903,14 @@ export default {
             }
           }
           
-          // Check for duplicate hostname
+          // Validate power_mac_address format (optional, but must be valid MAC if provided)
+          if (row.power_mac_address && row.power_mac_address.trim()) {
+            if (!isValidMacAddress(row.power_mac_address)) {
+              rowErrors.push(`Invalid power_mac_address format: '${row.power_mac_address}'`)
+            }
+          }
+          
+          // Check for duplicate hostname within CSV
           if (row.hostname && row.hostname.trim()) {
             const hostname = row.hostname.trim().toLowerCase()
             if (hostnameSet.has(hostname)) {
@@ -4605,7 +4920,7 @@ export default {
             }
           }
           
-          // Check for duplicate MAC address
+          // Check for duplicate MAC address within CSV
           if (row.mac_address && row.mac_address.trim()) {
             const mac = row.mac_address.replace(/:/g, '').replace(/-/g, '').toLowerCase()
             if (macAddressSet.has(mac)) {
@@ -4625,6 +4940,11 @@ export default {
             }
             if (!row.power_address || !row.power_address.trim()) {
               rowErrors.push('power_address is required when power_type is ipmi')
+            } else {
+              // Validate IP address format
+              if (!isValidIpAddress(row.power_address)) {
+                rowErrors.push(`Invalid power_address format: '${row.power_address}' (must be valid IPv4 address, e.g., 192.168.1.3, not 192.168.1.03)`)
+              }
             }
             if (!row.power_user || !row.power_user.trim()) {
               rowErrors.push('power_user is required when power_type is ipmi')
@@ -4644,6 +4964,72 @@ export default {
           }
         })
         
+        // Step 2: Compare with existing machines (only if Step 1 passed)
+        if (errors.length === 0) {
+          const existingInfo = await collectExistingMachineInfo()
+          
+          // Re-validate each row against existing machines
+          data.forEach((row) => {
+            if (row.error) return // Skip rows with parsing errors
+            
+            const rowNum = row._rowNumber
+            const rowErrors = []
+            
+            // Check hostname against existing machines
+            if (row.hostname && row.hostname.trim()) {
+              const hostname = row.hostname.trim().toLowerCase()
+              if (existingInfo.hostnames.has(hostname)) {
+                rowErrors.push(`Hostname '${row.hostname}' already exists in existing machines`)
+              }
+            }
+            
+            // Check mac_address against existing machines
+            if (row.mac_address && row.mac_address.trim()) {
+              const mac = row.mac_address.replace(/:/g, '').replace(/-/g, '').toLowerCase()
+              if (existingInfo.macAddresses.has(mac)) {
+                rowErrors.push(`MAC address '${row.mac_address}' already exists in existing machines`)
+              }
+              // Also check against power_mac_address
+              if (existingInfo.powerMacAddresses.has(mac)) {
+                rowErrors.push(`MAC address '${row.mac_address}' conflicts with existing machine's power MAC address`)
+              }
+            }
+            
+            // Check power_mac_address against existing machines (only if not empty)
+            if (row.power_mac_address && row.power_mac_address.trim()) {
+              const powerMac = row.power_mac_address.replace(/:/g, '').replace(/-/g, '').toLowerCase()
+              if (existingInfo.macAddresses.has(powerMac)) {
+                rowErrors.push(`Power MAC address '${row.power_mac_address}' conflicts with existing machine's MAC address`)
+              }
+              if (existingInfo.powerMacAddresses.has(powerMac)) {
+                rowErrors.push(`Power MAC address '${row.power_mac_address}' already exists in existing machines`)
+              }
+            }
+            
+            // Check power_address against existing machines (only for IPMI)
+            const powerType = (row.power_type || '').toLowerCase().trim()
+            if (powerType === 'ipmi' && row.power_address && row.power_address.trim()) {
+              const powerAddress = row.power_address.trim().toLowerCase()
+              if (existingInfo.powerAddresses.has(powerAddress)) {
+                rowErrors.push(`Power address '${row.power_address}' already exists in existing machines`)
+              }
+            }
+            
+            if (rowErrors.length > 0) {
+              // Remove from validRows if it was added in Step 1
+              const validIndex = validRows.indexOf(rowNum)
+              if (validIndex > -1) {
+                validRows.splice(validIndex, 1)
+              }
+              
+              errors.push({
+                row: rowNum,
+                message: rowErrors.join('; ')
+              })
+            }
+          })
+        }
+        
         const result = {
           totalRows: data.length,
           validRows: validRows.length,
@@ -4654,6 +5040,14 @@ export default {
         }
         
         csvValidationResult.value = result
+        
+        // Store validated CSV data if validation passed
+        if (result.isValid) {
+          validatedCsvData.value = { header, data }
+        } else {
+          validatedCsvData.value = null
+        }
+        
         showValidationModal.value = true
         validationModalPosition.value = { top: 0, left: 0 }
         
@@ -4688,10 +5082,133 @@ export default {
       }
     }
     
+    // Convert CSV row to FormData for addMachine API
+    const createMachineFormData = (row) => {
+      const formData = new FormData()
+      const apiParams = settingsStore.getApiParams.value
+      
+      if (row.hostname && row.hostname.trim()) {
+        formData.append('hostname', row.hostname.trim())
+      }
+      formData.append('architecture', (row.architecture || 'amd64').trim())
+      formData.append('macAddresses', (row.mac_address || '').trim())
+      formData.append('powerType', (row.power_type || 'manual').toLowerCase().trim())
+      formData.append('commission', (row.commission || 'false').toString())
+      
+      if (row.description && row.description.trim()) {
+        formData.append('description', row.description.trim())
+      }
+      
+      // Add IPMI parameters if power_type is ipmi
+      const powerType = (row.power_type || '').toLowerCase().trim()
+      if (powerType === 'ipmi') {
+        if (row.power_driver && row.power_driver.trim()) {
+          formData.append('powerDriver', row.power_driver.trim())
+        }
+        if (row.power_boot_type && row.power_boot_type.trim()) {
+          formData.append('powerBootType', row.power_boot_type.trim())
+        }
+        if (row.power_address && row.power_address.trim()) {
+          formData.append('powerIpAddress', row.power_address.trim())
+        }
+        if (row.power_user && row.power_user.trim()) {
+          formData.append('powerUser', row.power_user.trim())
+        }
+        if (row.power_pass && row.power_pass.trim()) {
+          formData.append('powerPassword', row.power_pass.trim())
+        }
+        if (row.k_g && row.k_g.trim()) {
+          formData.append('powerKgBmcKey', row.k_g.trim())
+        }
+        if (row.cipher_suite_id && row.cipher_suite_id.trim()) {
+          formData.append('cipherSuiteId', row.cipher_suite_id.trim())
+        }
+        if (row.privilege_level && row.privilege_level.trim()) {
+          formData.append('privilegeLevel', row.privilege_level.trim())
+        }
+        if (row.workaround_flags && row.workaround_flags.trim()) {
+          formData.append('workaroundFlags', row.workaround_flags.trim())
+        }
+        if (row.power_mac_address && row.power_mac_address.trim()) {
+          formData.append('powerMac', row.power_mac_address.trim())
+        }
+      }
+      
+      formData.append('maasUrl', apiParams.maasUrl)
+      formData.append('apiKey', apiParams.apiKey)
+      
+      return formData
+    }
+    
     const uploadBulkMachines = async () => {
-      // 버튼 텍스트가 "Upload & Process"일 때는 미구현 팝업 표시
+      // 버튼 텍스트가 "Upload & Process"일 때는 실제 업로드 진행
       if (bulkAddButtonText.value === 'Upload & Process') {
-        await customAlert('이 기능은 아직 구현되지 않았습니다.', '미구현')
+        if (!validatedCsvData.value) {
+          await customAlert('No validated CSV data found. Please validate the CSV file first.', 'Error')
+          return
+        }
+        
+        const { data } = validatedCsvData.value
+        const validRows = data.filter(row => !row.error)
+        
+        if (validRows.length === 0) {
+          await customAlert('No valid rows to process.', 'Error')
+          return
+        }
+        
+        // Initialize progress
+        bulkUploadInProgress.value = true
+        bulkUploadCurrentRow.value = 0
+        bulkUploadTotalRows.value = validRows.length
+        bulkUploadProgressPercent.value = 0
+        bulkUploadResult.value = {
+          successCount: 0,
+          failedCount: 0,
+          errors: []
+        }
+        showBulkUploadProgress.value = true
+        bulkUploadProgressPosition.value = { top: 0, left: 0 }
+        
+        // Process each row sequentially
+        for (let i = 0; i < validRows.length; i++) {
+          const row = validRows[i]
+          bulkUploadCurrentRow.value = i + 1
+          bulkUploadCurrentMachine.value = row.hostname || `Row ${row._rowNumber}`
+          bulkUploadProgressPercent.value = ((i + 1) / validRows.length) * 100
+          
+          try {
+            const formData = createMachineFormData(row)
+            const response = await axios.post('http://localhost:8081/api/machines', formData, {
+              headers: {
+                'Content-Type': 'multipart/form-data'
+              }
+            })
+            
+            if (response.data && response.data.success) {
+              bulkUploadResult.value.successCount++
+            } else {
+              bulkUploadResult.value.failedCount++
+              bulkUploadResult.value.errors.push({
+                row: row._rowNumber,
+                hostname: row.hostname || 'N/A',
+                message: response.data?.error || 'Failed to add machine'
+              })
+              // Stop on error
+              break
+            }
+          } catch (err) {
+            bulkUploadResult.value.failedCount++
+            bulkUploadResult.value.errors.push({
+              row: row._rowNumber,
+              hostname: row.hostname || 'N/A',
+              message: err.response?.data?.error || err.message || 'Failed to add machine'
+            })
+            // Stop on error
+            break
+          }
+        }
+        
+        bulkUploadInProgress.value = false
         return
       }
       // "Validate"일 때는 검증 실행
@@ -6019,9 +6536,29 @@ export default {
     
     // IP 주소 유효성 검사
     const isValidIpAddress = (ipAddress) => {
-      if (!ipAddress) return false
-      const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
-      return ipRegex.test(ipAddress)
+      if (!ipAddress || typeof ipAddress !== 'string') return false
+      const trimmed = ipAddress.trim()
+      
+      // IPv4 형식 체크: xxx.xxx.xxx.xxx
+      const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+      const match = trimmed.match(ipv4Regex)
+      
+      if (!match) return false
+      
+      // 각 옥텟이 0-255 범위인지 확인하고, leading zeros가 없는지 확인
+      for (let i = 1; i <= 4; i++) {
+        const octet = match[i]
+        const num = parseInt(octet, 10)
+        
+        // 범위 체크 (0-255)
+        if (num < 0 || num > 255) return false
+        
+        // Leading zeros 체크 (예: 03, 001 등은 허용하지 않음)
+        // 단, 0 자체는 허용
+        if (octet.length > 1 && octet[0] === '0') return false
+      }
+      
+      return true
     }
     
     // CIDR에서 기본 IP 예시 생성 (예: "192.168.189.0/24" -> "192.168.189.100")
@@ -7599,13 +8136,15 @@ export default {
       }
     })
     
-    // itemsPerPage가 변경되면 Settings에도 반영 (자동 저장)
+    // itemsPerPage가 변경되면 Settings에도 반영 (자동 저장) 및 첫 페이지로 리셋
     watch(itemsPerPage, (newValue) => {
       if (newValue && settingsStore.settings.itemsPerPage !== newValue) {
         settingsStore.settings.itemsPerPage = newValue
         // Settings에 자동 저장
         settingsStore.save()
       }
+      // 페이지 크기 변경 시 첫 페이지로 리셋
+      currentPage.value = 1
     })
     
     // 외부 클릭 시 Power 메뉴, Status Select 메뉴, Action Bar 메뉴, Add Machine 드롭다운 닫기
@@ -7747,6 +8286,17 @@ export default {
         startDragValidationModal,
         closeValidationModal,
         bulkAddButtonText,
+        showBulkUploadProgress,
+        bulkUploadInProgress,
+        bulkUploadCurrentRow,
+        bulkUploadTotalRows,
+        bulkUploadCurrentMachine,
+        bulkUploadProgressPercent,
+        bulkUploadResult,
+        bulkUploadProgressPosition,
+        isDraggingBulkUploadProgressModal,
+        startDragBulkUploadProgressModal,
+        closeBulkUploadProgressModal,
         validateMacAddress,
         addMachine,
         // Commission Machine
@@ -7776,6 +8326,11 @@ export default {
         handlePowerAction,
         handleCheckPower,
         getMachineById,
+        // Deploy Menu
+        hoveredDeployMachine,
+        openDeployMenu,
+        deployMenuPosition,
+        toggleDeployMenu,
         // Deploy Modal
         showDeployModalState,
         selectedDeployMachine,
@@ -8867,7 +9422,15 @@ export default {
 .pagination-controls {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
+}
+
+.page-info {
+  padding: 0 0.75rem;
+  font-size: 0.9rem;
+  color: #495057;
+  min-width: 100px;
+  text-align: center;
 }
 
 .page-size-select {
@@ -9108,7 +9671,67 @@ export default {
   padding: 0.5rem;
   margin-bottom: 0.5rem;
   border-radius: 4px;
-  font-size: 0.9rem;
+}
+
+/* Bulk Upload Progress Modal */
+.upload-progress {
+  padding: 1.5rem;
+}
+
+.progress-info {
+  margin-bottom: 1rem;
+}
+
+.progress-info p {
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  color: #495057;
+}
+
+.current-machine {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 24px;
+  background-color: #e9ecef;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 1rem 0;
+}
+
+.progress-bar {
+  height: 100%;
+  background-color: #007bff;
+  transition: width 0.3s ease;
+  border-radius: 12px;
+}
+
+.progress-text {
+  text-align: center;
+  font-weight: 600;
+  color: #495057;
+  margin-top: 0.5rem;
+}
+
+.upload-result {
+  padding: 1.5rem;
+}
+
+.result-summary {
+  margin-bottom: 1.5rem;
+}
+
+.upload-errors {
+  margin-top: 1.5rem;
+}
+
+.upload-errors h4 {
+  margin-bottom: 0.75rem;
+  color: #dc3545;
+  font-size: 1rem;
 }
 
 .error-item {

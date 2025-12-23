@@ -586,21 +586,42 @@ MachinesTab.vue (실시간 UI 업데이트)
        - CSV 헤더: hostname, architecture, mac_address, power_type, commission, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
        - 예시 데이터 2개 행 제공 (IPMI 예시, Manual 예시)
      - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
-     - CSV 파일 검증:
-       - 필수 필드 검증: hostname, architecture, mac_address, power_type, commission
-       - power_type이 'ipmi'인 경우 추가 필수 필드: power_driver, power_boot_type, power_address, power_user, power_pass
-       - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
-       - CSV 내 hostname 중복 검사
-       - CSV 내 mac_address 중복 검사
-       - 최소 필수 컬럼 수 검증 (컬럼이 부족하면 오류, 많으면 허용)
+     - CSV 파일 검증 (2단계):
+       - **1단계: CSV 내부 검증**
+         - 필수 필드 검증: hostname, architecture, mac_address, power_type, commission
+         - power_type이 'ipmi'인 경우 추가 필수 필드: power_driver, power_boot_type, power_address, power_user, power_pass
+         - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
+         - power_mac_address 형식 검증 (빈 값이 아닌 경우 MAC 주소 형식 필수)
+         - IP 주소 형식 검증 (power_address, leading zeros 방지, 예: xx.xx.xx.03 -> xx.xx.xx.3)
+         - CSV 내 hostname 중복 검사
+         - CSV 내 mac_address 중복 검사
+         - 최소 필수 컬럼 수 검증 (컬럼이 부족하면 오류, 많으면 허용)
+       - **2단계: 기존 머신 정보와 비교 검증**
+         - hostname 중복 검사 (기존 머신의 hostname과 비교)
+         - mac_address 중복 검사 (기존 머신의 mac_addresses, power_parameters_mac_address와 비교)
+         - power_mac_address 중복 검사 (빈 값이 아닌 경우, 기존 머신의 mac_addresses, power_parameters_mac_address와 비교)
+         - power_address 중복 검사 (power_type이 'ipmi'인 경우, 기존 머신의 power_parameters_power_address와 비교)
        - 검증 결과 모달 표시 (전체/유효/오류 행 수, 오류 상세 목록)
      - 버튼 동작:
        - 초기 버튼 텍스트: "Validate"
        - 검증 성공 시: 검증 결과 모달 닫을 때 버튼 텍스트가 "Upload & Process"로 변경
        - 검증 실패 시: 선택된 CSV 파일 삭제, 버튼 텍스트는 "Validate"로 유지, 버튼 비활성화 (새 CSV 파일 선택 시까지)
-       - "Upload & Process" 버튼 클릭 시: 미구현 팝업 표시 ("이 기능은 아직 구현되지 않았습니다.")
-     - CSV 파싱 및 미리보기 (향후 구현)
-     - 대량 등록 처리 (향후 구현)
+       - CSV 파일 선택 제거 시 (X 버튼): 버튼 텍스트가 "Validate"로 리셋, 버튼 비활성화
+       - "Upload & Process" 버튼 클릭 시: 대량 등록 처리 시작
+     - 대량 등록 처리:
+       - 검증된 CSV 데이터를 순차적으로 처리 (1개씩)
+       - 진행 상황 모달 표시:
+         - 현재 처리 중인 행 번호 / 전체 행 수
+         - 현재 처리 중인 머신의 hostname
+         - 진행률 퍼센트 및 프로그레스 바
+         - 모달 드래그 가능
+       - 에러 처리:
+         - 머신 추가 중 에러 발생 시 즉시 중단
+         - 에러 발생한 행의 상세 정보 수집
+       - 완료 리포트:
+         - 전체/성공/실패 행 수 표시
+         - 실패한 행의 상세 에러 목록 표시
+         - 리포트 모달 닫을 때 Machines 탭 자동 리로드
 - **UI/UX 특징**:
   - 드롭다운 버튼: "[+ Add Machine(s) ▼]" 형태로 단일/대량 등록 선택
   - 단일 등록 모달:
@@ -620,13 +641,23 @@ MachinesTab.vue (실시간 UI 업데이트)
       - "Validate" 버튼: CSV 파일 검증 실행 (파일 선택 시 활성화)
       - 검증 성공 시 "Upload & Process" 버튼으로 변경
       - 검증 실패 시 CSV 파일 삭제 및 버튼 비활성화 (새 파일 선택 시까지)
-      - "Upload & Process" 버튼 클릭 시 미구현 팝업 표시
+      - CSV 파일 선택 제거 시 버튼 텍스트 "Validate"로 리셋 및 비활성화
+      - "Upload & Process" 버튼 클릭 시 대량 등록 처리 시작 (진행 상황 모달 표시)
   - 검증 결과 모달:
     - 검증 상태 요약 (전체/유효/오류 행 수)
     - 오류 목록 (행 번호별 상세 오류 메시지)
     - 경고 목록 (향후 확장용)
     - 모달 드래그 가능
     - 성공/오류 상태에 따른 색상 구분
+  - 대량 등록 진행 상황 모달:
+    - 현재 처리 중인 행 번호 / 전체 행 수
+    - 현재 처리 중인 머신의 hostname
+    - 진행률 퍼센트 및 프로그레스 바
+    - 모달 드래그 가능
+  - 대량 등록 완료 리포트 모달:
+    - 전체/성공/실패 행 수 표시
+    - 실패한 행의 상세 에러 목록
+    - 모달 닫을 때 Machines 탭 자동 리로드
 - **에러 처리**:
   - MAC 주소 형식 오류 검증
   - API 오류 메시지 표시
@@ -634,8 +665,14 @@ MachinesTab.vue (실시간 UI 업데이트)
     - 필수 필드 누락 검증
     - power_type별 필수 필드 검증
     - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
+    - power_mac_address 형식 검증 (빈 값이 아닌 경우 MAC 주소 형식 필수)
+    - IP 주소 형식 검증 (power_address, leading zeros 방지)
     - CSV 내 중복 값 검증 (hostname, mac_address)
+    - 기존 머신 정보와 중복 검증 (hostname, mac_address, power_address, power_mac_address)
     - 컬럼 수 부족 검증
+  - 대량 등록 처리 오류:
+    - 머신 추가 중 에러 발생 시 즉시 중단
+    - 에러 발생한 행의 상세 정보 수집 및 리포트 표시
     - 검증 결과를 모달로 상세 표시
     - 검증 실패 시: 선택된 CSV 파일 자동 삭제, "Validate" 버튼 비활성화 (새 CSV 파일 선택 시까지)
     - 검증 성공 후 "Upload & Process" 버튼 클릭 시: 미구현 팝업 표시
@@ -2306,6 +2343,7 @@ public class MaasController {
   - `selectedStatus`: 선택된 상태 필터
   - `selectedMachines`: 선택된 머신 ID 목록
   - `currentPage`: 현재 페이지
+  - `itemsPerPage`: 페이지당 항목 수 (Settings에서 가져옴, 10/25/50/100)
   - `connectionStatus`: WebSocket 연결 상태
   - `hoveredPowerMachine`: Power 컬럼 호버 상태
   - `openPowerMenu`: 열린 Power 메뉴 ID
@@ -2315,6 +2353,21 @@ public class MaasController {
   - `deployMenuPosition`: Deploy OS 선택 메뉴 위치
   - `deployableOSList`: Deployable OS 목록
   - `loadingDeployableOS`: Deployable OS 로딩 상태
+  - CSV 대량 등록 관련 상태:
+    - `showBulkAddModal`: Bulk Add from CSV 모달 표시 여부
+    - `selectedCsvFile`: 선택된 CSV 파일
+    - `csvValidationResult`: CSV 검증 결과
+    - `showValidationModal`: 검증 결과 모달 표시 여부
+    - `validatedCsvData`: 검증 성공한 CSV 데이터 (대량 등록에 사용)
+    - `bulkAddButtonText`: 버튼 텍스트 ("Validate" 또는 "Upload & Process")
+    - `validationFailed`: 검증 실패 여부
+    - `showBulkUploadProgress`: 대량 등록 진행 상황 모달 표시 여부
+    - `bulkUploadInProgress`: 대량 등록 진행 중 여부
+    - `bulkUploadCurrentRow`: 현재 처리 중인 행 번호
+    - `bulkUploadTotalRows`: 전체 행 수
+    - `bulkUploadCurrentMachine`: 현재 처리 중인 머신의 hostname
+    - `bulkUploadProgressPercent`: 진행률 퍼센트
+    - `bulkUploadResult`: 대량 등록 완료 결과 (성공/실패 수, 에러 목록)
 - **메서드**:
   - `loadMachines()`: 머신 목록 로드
   - `showAddMachineModal()`: 머신 추가 모달 표시
@@ -2334,8 +2387,24 @@ public class MaasController {
   - `handlePowerAction()`: Power 액션 처리 (Turn on/Turn off)
   - `handleCheckPower()`: Power 상태 조회 처리 (Check power)
   - `getMachineById()`: 머신 ID로 머신 객체 조회
+  - CSV 대량 등록 관련 메서드:
+    - `showBulkAddModal()`: Bulk Add from CSV 모달 표시
+    - `handleCsvFileSelect()`: CSV 파일 선택 처리
+    - `clearSelectedFile()`: 선택된 CSV 파일 제거
+    - `downloadSampleCsv()`: 샘플 CSV 파일 다운로드
+    - `parseCSV()`: CSV 파일 파싱
+    - `validateCSV()`: CSV 파일 검증 (1단계: 내부 검증, 2단계: 기존 머신 정보와 비교)
+    - `collectExistingMachineInfo()`: 기존 머신 정보 수집 (hostname, mac_address, power_address, power_mac_address)
+    - `handleValidateCsv()`: CSV 검증 실행
+    - `closeValidationModal()`: 검증 결과 모달 닫기
+    - `handleBulkUpload()`: 대량 등록 처리 시작
+    - `createMachineFormData(row)`: CSV 행을 FormData로 변환
+    - `closeBulkUploadProgressModal()`: 대량 등록 진행 상황 모달 닫기 및 Machines 탭 리로드
+    - `startDragValidationModal()`, `onDragValidationModal()`, `stopDragValidationModal()`: 검증 결과 모달 드래그 처리
+    - `startDragBulkUploadProgressModal()`, `onDragBulkUploadProgressModal()`, `stopDragBulkUploadProgressModal()`: 진행 상황 모달 드래그 처리
   - `filteredMachines`: 검색/필터링된 머신 목록 (computed)
-  - `paginatedMachines`: 페이지네이션된 머신 목록 (computed)
+  - `totalPages`: 전체 페이지 수 (computed, filteredMachines.length / itemsPerPage 기반)
+  - `paginatedMachines`: 페이지네이션된 머신 목록 (computed, filteredMachines를 currentPage와 itemsPerPage로 슬라이싱)
 
 ##### SettingsTab.vue
 - **역할**: 설정 화면
@@ -2469,7 +2538,12 @@ maas.default.api-key=consumer_key:token:token_secret
     - Pool, Zone, Fabric 컬럼
     - 하드웨어 정보 컬럼 (Cores, RAM, Disks, Storage)
     - Actions 컬럼 (상태별 동적 버튼: Commission/Release, Network, Deploy)
-  - 페이지네이션
+  - 페이지네이션:
+    - 페이지 이동 버튼: << (첫 페이지), < (이전 페이지), > (다음 페이지), >> (마지막 페이지)
+    - 페이지 정보 표시: "Page X of Y" 형식
+    - 페이지당 항목 수 선택: 10, 25, 50, 100 (드롭다운)
+    - 페이지당 항목 수 변경 시 첫 페이지로 자동 리셋
+    - 첫/마지막 페이지에서 해당 방향 버튼 비활성화
   - 모달:
     - Add Machine 모달 (드래그 가능, 바깥 클릭으로 닫히지 않음)
     - Bulk Add from CSV 모달 (드래그 가능, 바깥 클릭으로 닫히지 않음)
@@ -2547,20 +2621,35 @@ maas.default.api-key=consumer_key:token:token_secret
      - 예시 데이터 2개 행 (IPMI 예시, Manual 예시)
    - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
    - "Validate" 버튼 클릭하여 CSV 파일 검증:
-     - 필수 필드 검증 (hostname, architecture, mac_address, power_type, commission)
-     - power_type이 'ipmi'인 경우 추가 필수 필드 검증
-     - MAC 주소 형식 검증
-     - CSV 내 중복 값 검증 (hostname, mac_address)
-     - 컬럼 수 검증
+     - **1단계: CSV 내부 검증**
+       - 필수 필드 검증 (hostname, architecture, mac_address, power_type, commission)
+       - power_type이 'ipmi'인 경우 추가 필수 필드 검증
+       - MAC 주소 형식 검증
+       - power_mac_address 형식 검증 (빈 값이 아닌 경우)
+       - IP 주소 형식 검증 (power_address, leading zeros 방지)
+       - CSV 내 중복 값 검증 (hostname, mac_address)
+       - 컬럼 수 검증
+     - **2단계: 기존 머신 정보와 비교 검증**
+       - hostname 중복 검사 (기존 머신의 hostname과 비교)
+       - mac_address 중복 검사 (기존 머신의 mac_addresses, power_parameters_mac_address와 비교)
+       - power_mac_address 중복 검사 (빈 값이 아닌 경우, 기존 머신의 mac_addresses, power_parameters_mac_address와 비교)
+       - power_address 중복 검사 (power_type이 'ipmi'인 경우, 기존 머신의 power_parameters_power_address와 비교)
      - 검증 결과 모달 표시
    - 검증 성공 시:
      - 검증 결과 모달 닫을 때 버튼 텍스트가 "Upload & Process"로 변경
-     - "Upload & Process" 버튼 클릭 시 미구현 팝업 표시 ("이 기능은 아직 구현되지 않았습니다.")
+     - "Upload & Process" 버튼 클릭 시 대량 등록 처리 시작
    - 검증 실패 시:
      - 선택된 CSV 파일 자동 삭제
      - "Validate" 버튼 비활성화 (새 CSV 파일 선택 시까지)
-   - CSV 파싱 및 미리보기 (향후 구현)
-   - 대량 등록 처리 (향후 구현)
+   - CSV 파일 선택 제거 시 (X 버튼):
+     - 버튼 텍스트 "Validate"로 리셋
+     - 버튼 비활성화
+   - 대량 등록 처리:
+     - 검증된 CSV 데이터를 순차적으로 처리 (1개씩)
+     - 진행 상황 모달 표시 (현재 행/전체 행, 현재 머신 hostname, 진행률)
+     - 에러 발생 시 즉시 중단
+     - 완료 리포트 표시 (전체/성공/실패 행 수, 에러 목록)
+     - 리포트 모달 닫을 때 Machines 탭 자동 리로드
 
 #### 커미셔닝 흐름
 1. Machines Tab에서 머신의 "Commission" 버튼 클릭
