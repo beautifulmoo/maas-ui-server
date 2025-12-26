@@ -4281,6 +4281,24 @@ export default {
     }
     
     // Status Select Menu 토글
+    const updateStatusSelectMenuPosition = () => {
+      if (openStatusSelectMenu.value) {
+        nextTick(() => {
+          const selectAllContainer = document.querySelector('.select-all-container')
+          if (selectAllContainer) {
+            const containerRect = selectAllContainer.getBoundingClientRect()
+            if (containerRect) {
+              // position: fixed는 뷰포트 기준이므로 getBoundingClientRect()의 값을 그대로 사용
+              statusSelectMenuPosition.value = {
+                top: containerRect.bottom + 4,
+                left: containerRect.left
+              }
+            }
+          }
+        })
+      }
+    }
+    
     const toggleStatusSelectMenu = (event) => {
       if (openStatusSelectMenu.value) {
         openStatusSelectMenu.value = false
@@ -4291,9 +4309,10 @@ export default {
           if (selectAllContainer) {
             const containerRect = selectAllContainer.getBoundingClientRect()
             if (containerRect) {
+              // position: fixed는 뷰포트 기준이므로 getBoundingClientRect()의 값을 그대로 사용
               statusSelectMenuPosition.value = {
-                top: containerRect.bottom + window.scrollY + 4,
-                left: containerRect.left + window.scrollX
+                top: containerRect.bottom + 4,
+                left: containerRect.left
               }
               openStatusSelectMenu.value = true
             } else {
@@ -8191,11 +8210,20 @@ export default {
       
       // 외부 클릭 이벤트 리스너 추가
       document.addEventListener('click', handleClickOutside)
+      
+      // 스크롤 이벤트 리스너 추가 (Status Select 메뉴 위치 업데이트)
+      // window와 document 모두에 추가하여 모든 스크롤 이벤트 감지
+      window.addEventListener('scroll', updateStatusSelectMenuPosition, true)
+      document.addEventListener('scroll', updateStatusSelectMenuPosition, true)
     })
     
     onUnmounted(() => {
       // 외부 클릭 이벤트 리스너 제거
       document.removeEventListener('click', handleClickOutside)
+      
+      // 스크롤 이벤트 리스너 제거
+      window.removeEventListener('scroll', updateStatusSelectMenuPosition, true)
+      document.removeEventListener('scroll', updateStatusSelectMenuPosition, true)
     })
     
       return {

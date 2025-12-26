@@ -435,6 +435,7 @@ MachinesTab.vue (실시간 UI 업데이트)
     - `selectedStatusesForSelection`: 선택된 상태 목록 (ref)
     - `toggleSelectByStatus()`: 상태별 선택 토글 함수
     - `toggleStatusSelectMenu()`: 드롭다운 메뉴 열기/닫기
+    - `updateStatusSelectMenuPosition()`: 스크롤 시 드롭다운 메뉴 위치 업데이트 (window와 document 스크롤 이벤트 리스너 사용)
     - `isStatusSelected()`: 특정 상태 선택 여부 확인
     - `getStatusDisplayName()`: 상태 표시 이름 변환
     - `isStatusInProgress()`: 진행 중 상태 판별 함수
@@ -1723,6 +1724,11 @@ public class MaasController {
   "data": { /* 머신 정보 */ }
 }
 ```
+- **MAAS API**: `POST /MAAS/api/2.0/machines/`
+- **타임아웃**: 60초 (IPMI + commissioning 처리 시간 고려)
+- **주요 코드 파일**:
+  - `MaasController.addMachine()`: API 엔드포인트
+  - `MaasApiService.addMachine()`: MAAS API 호출
 
 ##### POST /api/machines/{systemId}/commission
 - **설명**: 머신 커미셔닝
@@ -2353,6 +2359,9 @@ public class MaasController {
   - `deployMenuPosition`: Deploy OS 선택 메뉴 위치
   - `deployableOSList`: Deployable OS 목록
   - `loadingDeployableOS`: Deployable OS 로딩 상태
+  - Status Select 메뉴 관련 상태:
+    - `openStatusSelectMenu`: Status Select 드롭다운 메뉴 열림 여부
+    - `statusSelectMenuPosition`: Status Select 드롭다운 메뉴 위치 (스크롤 시 업데이트)
   - CSV 대량 등록 관련 상태:
     - `showBulkAddModal`: Bulk Add from CSV 모달 표시 여부
     - `selectedCsvFile`: 선택된 CSV 파일
@@ -2387,6 +2396,9 @@ public class MaasController {
   - `handlePowerAction()`: Power 액션 처리 (Turn on/Turn off)
   - `handleCheckPower()`: Power 상태 조회 처리 (Check power)
   - `getMachineById()`: 머신 ID로 머신 객체 조회
+  - Status Select 메뉴 관련 메서드:
+    - `toggleStatusSelectMenu()`: Status Select 드롭다운 메뉴 열기/닫기
+    - `updateStatusSelectMenuPosition()`: 스크롤 시 Status Select 드롭다운 메뉴 위치 업데이트
   - CSV 대량 등록 관련 메서드:
     - `showBulkAddModal()`: Bulk Add from CSV 모달 표시
     - `handleCsvFileSelect()`: CSV 파일 선택 처리
@@ -2528,6 +2540,7 @@ maas.default.api-key=consumer_key:token:token_secret
   - 컨텐츠 영역 (로딩/에러 메시지와 테이블을 감싸는 고정 높이 컨테이너)
   - 머신 테이블
     - 체크박스 컬럼 (전체 선택 체크박스 + 상태별 선택 드롭다운 아이콘)
+      - 상태별 선택 드롭다운 메뉴: 스크롤 시 테이블 헤더의 체크박스 컨테이너를 따라 이동 (position: fixed 사용, 스크롤 이벤트로 위치 업데이트)
     - FQDN 컬럼 (호스트명, MAC 주소, IP 주소)
     - Power 컬럼 (Power State, Power Type, Power Action 드롭다운)
     - Status 컬럼 (로딩 스피너, 상태 배지, 상태 메시지)
@@ -2824,7 +2837,10 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
 - **프로토콜**: HTTP/HTTPS
 - **인증**: OAuth 1.0
 - **엔드포인트**: `{maasUrl}/MAAS/api/2.0/`
-- **타임아웃**: 30초 (일반 API), 10초 (연결 테스트)
+- **타임아웃**: 
+  - 일반 API: 30초
+  - 머신 추가 (POST /api/machines): 60초 (IPMI + commissioning 처리 시간 고려)
+  - 연결 테스트: 10초
 
 #### WebSocket 연결
 - **프로토콜**: WebSocket (ws:// 또는 wss://)

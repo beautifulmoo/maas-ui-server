@@ -678,7 +678,7 @@ public class MaasApiService {
                             .cast(Throwable.class);
                 })
                 .bodyToMono(String.class)
-                .timeout(Duration.ofSeconds(30))
+                .timeout(Duration.ofSeconds(60)) // 타임아웃을 60초(1분)로 증가 (IPMI + commissioning 처리 시간 고려)
                 .map(responseBody -> {
                     try {
                         System.out.println("Add Machine API Response: " + responseBody.substring(0, Math.min(500, responseBody.length())));
