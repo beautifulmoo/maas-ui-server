@@ -2183,6 +2183,14 @@
         </div>
         
         <div class="bulk-add-content">
+          <!-- Important Notice -->
+          <div class="bulk-add-notice">
+            <div class="notice-icon">ℹ️</div>
+            <div class="notice-content">
+              <strong>Important:</strong> Machines added via CSV bulk upload will <strong>not</strong> be automatically commissioned. After adding machines, please manually commission them from the Machines tab.
+            </div>
+          </div>
+          
           <!-- Sample CSV Section -->
           <div class="sample-csv-section">
             <h4>CSV Format</h4>
@@ -2203,7 +2211,6 @@
                       <th>architecture</th>
                       <th>mac_address</th>
                       <th>power_type</th>
-                      <th>commission</th>
                       <th>description</th>
                       <th>power_driver</th>
                       <th>power_boot_type</th>
@@ -2223,7 +2230,6 @@
                       <td>amd64</td>
                       <td>aa:bb:cc:dd:ee:ff</td>
                       <td>ipmi</td>
-                      <td>true</td>
                       <td>test 00</td>
                       <td>LAN_2_0</td>
                       <td>auto</td>
@@ -2241,7 +2247,6 @@
                       <td>amd64</td>
                       <td>aa:bb:cc:dd:ee:fe</td>
                       <td>manual</td>
-                      <td>false</td>
                       <td>test 01</td>
                       <td></td>
                       <td></td>
@@ -2302,13 +2307,17 @@
         </div>
 
         <div class="modal-actions">
-          <button type="button" class="btn-secondary" @click="closeBulkAddModal">
-            Cancel
+          <button 
+            type="button" 
+            :class="bulkUploadCompleted ? 'btn-primary' : 'btn-secondary'" 
+            @click="closeBulkAddModal"
+          >
+            {{ bulkUploadCompleted ? 'Done' : 'Cancel' }}
           </button>
           <button 
             type="button" 
             class="btn-primary" 
-            :disabled="!selectedCsvFile || uploadingBulkMachines || validationFailed"
+            :disabled="!selectedCsvFile || uploadingBulkMachines || validationFailed || bulkUploadCompleted"
             @click="uploadBulkMachines"
           >
             <span v-if="uploadingBulkMachines">Processing...</span>
@@ -2560,6 +2569,7 @@ export default {
     const bulkUploadProgressPosition = ref({ top: 0, left: 0 })
     const isDraggingBulkUploadProgressModal = ref(false)
     const bulkUploadProgressDragStart = ref({ x: 0, y: 0 })
+    const bulkUploadCompleted = ref(false) // 업로드 완료 상태 추적
     
     // Store validated CSV data for processing
     const validatedCsvData = ref(null)
@@ -4514,6 +4524,8 @@ export default {
       clearSelectedFile()
       bulkAddButtonText.value = 'Validate' // 모달 열 때 버튼 텍스트 초기화
       validationFailed.value = false // 모달 열 때 플래그 초기화
+      bulkUploadCompleted.value = false // 모달 열 때 업로드 완료 상태 리셋
+      validatedCsvData.value = null // 검증된 데이터도 리셋
     }
     
     const closeBulkAddModal = () => {
@@ -4523,6 +4535,8 @@ export default {
       isDragOver.value = false
       bulkAddButtonText.value = 'Validate' // 모달 닫을 때 버튼 텍스트 초기화
       validationFailed.value = false // 모달 닫을 때 플래그 초기화
+      bulkUploadCompleted.value = false // 모달 닫을 때 업로드 완료 상태 리셋
+      validatedCsvData.value = null // 검증된 데이터도 리셋
     }
     
     const triggerFileInput = () => {
@@ -4536,6 +4550,8 @@ export default {
           selectedCsvFile.value = file
           validationFailed.value = false // 새 CSV 파일 선택 시 플래그 리셋
           bulkAddButtonText.value = 'Validate' // 버튼 텍스트를 Validate로 초기화
+          bulkUploadCompleted.value = false // 새 CSV 파일 선택 시 업로드 완료 상태 리셋
+          validatedCsvData.value = null // 검증된 데이터도 리셋
         } else {
           alert('Please select a CSV file')
         }
@@ -4551,6 +4567,8 @@ export default {
           selectedCsvFile.value = file
           validationFailed.value = false // 새 CSV 파일 선택 시 플래그 리셋
           bulkAddButtonText.value = 'Validate' // 버튼 텍스트를 Validate로 초기화
+          bulkUploadCompleted.value = false // 새 CSV 파일 선택 시 업로드 완료 상태 리셋
+          validatedCsvData.value = null // 검증된 데이터도 리셋
         } else {
           alert('Please drop a CSV file')
         }
@@ -4565,6 +4583,8 @@ export default {
       // 파일 제거 시 버튼 텍스트를 Validate로 리셋
       bulkAddButtonText.value = 'Validate'
       validationFailed.value = false
+      bulkUploadCompleted.value = false // 파일 제거 시 업로드 완료 상태 리셋
+      validatedCsvData.value = null // 검증된 데이터도 리셋
     }
     
     const formatFileSize = (bytes) => {
@@ -4576,7 +4596,7 @@ export default {
     }
     
     const downloadSampleCSV = () => {
-      const sampleContent = 'hostname,architecture,mac_address,power_type,commission,description,power_driver,power_boot_type,power_address,power_user,power_pass,k_g,cipher_suite_id,privilege_level,workaround_flags,power_mac_address\ntest-vm-00,amd64,aa:bb:cc:dd:ee:ff,ipmi,true,test 00,LAN_2_0,auto,172.29.244.51,ADMIN,ADMIN,,3,OPERATOR,opensesspriv,08:00:27:11:34:28\ntest-vm-01,amd64,aa:bb:cc:dd:ee:fe,manual,false,test 01,,,,,,,,,,'
+      const sampleContent = 'hostname,architecture,mac_address,power_type,description,power_driver,power_boot_type,power_address,power_user,power_pass,k_g,cipher_suite_id,privilege_level,workaround_flags,power_mac_address\ntest-vm-00,amd64,aa:bb:cc:dd:ee:ff,ipmi,test 00,LAN_2_0,auto,172.29.244.51,ADMIN,ADMIN,,3,OPERATOR,opensesspriv,08:00:27:11:34:28\ntest-vm-01,amd64,aa:bb:cc:dd:ee:fe,manual,test 01,,,,,,,,,'
       const blob = new Blob([sampleContent], { type: 'text/csv' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -4707,7 +4727,15 @@ export default {
       
       // Reload machines list if upload was completed
       if (!bulkUploadInProgress.value) {
-        await loadMachines()
+        // 먼저 bulkUploadCompleted를 true로 설정하여 즉시 Done 버튼으로 변경
+        bulkUploadCompleted.value = true
+        // Vue 반응성 업데이트를 보장하기 위해 nextTick 사용
+        await nextTick()
+        
+        // 그 다음 백그라운드에서 머신 목록 새로고침 (await 없이)
+        loadMachines().catch(err => {
+          console.error('Failed to reload machines:', err)
+        })
       }
     }
     
@@ -4732,7 +4760,7 @@ export default {
             }
             
             const header = lines[0].split(',').map(h => h.trim())
-            const expectedHeader = ['hostname', 'architecture', 'mac_address', 'power_type', 'commission', 'description', 'power_driver', 'power_boot_type', 'power_address', 'power_user', 'power_pass', 'k_g', 'cipher_suite_id', 'privilege_level', 'workaround_flags', 'power_mac_address']
+            const expectedHeader = ['hostname', 'architecture', 'mac_address', 'power_type', 'description', 'power_driver', 'power_boot_type', 'power_address', 'power_user', 'power_pass', 'k_g', 'cipher_suite_id', 'privilege_level', 'workaround_flags', 'power_mac_address']
             
             // Check if header matches expected format (allow extra columns)
             const minRequiredColumns = expectedHeader.length
@@ -4904,9 +4932,6 @@ export default {
           }
           if (!row.power_type || !row.power_type.trim()) {
             rowErrors.push('power_type is required')
-          }
-          if (row.commission === undefined || row.commission === null || row.commission === '') {
-            rowErrors.push('commission is required')
           }
           
           // Validate power_type
@@ -5112,7 +5137,8 @@ export default {
       formData.append('architecture', (row.architecture || 'amd64').trim())
       formData.append('macAddresses', (row.mac_address || '').trim())
       formData.append('powerType', (row.power_type || 'manual').toLowerCase().trim())
-      formData.append('commission', (row.commission || 'false').toString())
+      // CSV bulk add에서는 항상 commission=false로 설정
+      formData.append('commission', 'false')
       
       if (row.description && row.description.trim()) {
         formData.append('description', row.description.trim())
@@ -8325,6 +8351,7 @@ export default {
         isDraggingBulkUploadProgressModal,
         startDragBulkUploadProgressModal,
         closeBulkUploadProgressModal,
+        bulkUploadCompleted,
         validateMacAddress,
         addMachine,
         // Commission Machine
@@ -9591,6 +9618,34 @@ export default {
 
 .bulk-add-content {
   padding: 1.5rem;
+}
+
+.bulk-add-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196f3;
+  border-radius: 4px;
+}
+
+.bulk-add-notice .notice-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.bulk-add-notice .notice-content {
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #1565c0;
+}
+
+.bulk-add-notice .notice-content strong {
+  color: #0d47a1;
 }
 
 .validation-result-modal {
