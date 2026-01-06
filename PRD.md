@@ -493,14 +493,18 @@ MachinesTab.vue (실시간 UI 업데이트)
   2. `selectedMachines.length > 0`이 되면 액션 바가 화면 상단에 표시됨
   3. 액션 바 구성:
      - **Actions 드롭다운**: Commission, Allocate, Deploy, Release, Abort
-     - **Power 드롭다운**: Turn on, Turn off (Coming soon - 비활성화)
+     - **Power 드롭다운**: Turn on, Turn off, Check Power
      - **Delete 버튼**: 직접 클릭 가능
      - **선택된 머신 수 표시**: "X selected"
   4. Actions 드롭다운에서 액션 선택 시:
      - `handleBulkAction(action)` 호출
-     - 확인 메시지 표시
-     - 선택된 각 머신에 대해 해당 액션 수행 (상태 확인 후)
+     - Deploy 액션의 경우: 확인 메시지 없이 바로 Deploy 모달 표시 (OS 및 Cloud-Config 선택)
+     - 다른 액션의 경우: 확인 메시지 표시 후 선택된 각 머신에 대해 해당 액션 수행 (상태 확인 후)
      - 각 머신의 상태에 따라 액션 가능 여부 판단
+  5. Power 드롭다운에서 액션 선택 시:
+     - `handleBulkPowerAction(action)` 호출
+     - Turn on/Turn off: 확인 메시지 표시 후 선택된 각 머신에 대해 Power 작업 수행
+     - Check Power: 확인 메시지 표시 후 선택된 각 머신에 대해 순차적으로 전원 상태 조회
   5. Delete 버튼 클릭 시:
      - `handleBulkDelete()` 호출
      - 확인 메시지 표시 ("이 작업은 되돌릴 수 없습니다")
@@ -511,10 +515,17 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **액션별 동작 규칙**:
   - **Commission**: 선택된 머신 중 Commission 가능한 머신만 처리 (`canCommission()` 체크)
   - **Allocate**: 현재 API 미구현으로 항상 비활성화
-  - **Deploy**: Ready 또는 Allocated 상태인 머신만 처리
+  - **Deploy**: Ready 또는 Allocated 상태인 머신만 처리, Deploy 모달을 통해 OS 및 Cloud-Config 선택 후 배포
+    - 다중 선택 시에도 Deploy 모달 표시 (제목: "Deploy Multiple Machines")
+    - 네트워크 설정 확인: 하나라도 네트워크 설정이 안 되어 있으면 확인 팝업 표시
+    - 확인 메시지: "일부 머신의 네트워크 Configuration이 설정되지 않았습니다. 설정되지 않은 머신: {머신 목록}. 그래도 Deploy를 진행하시겠습니까?"
   - **Release**: Failed Deployment, Failed Disk Erasing, Deployed, 또는 Allocated 상태인 머신만 처리
   - **Abort**: Commissioning 또는 Deploying 상태인 머신만 처리
   - **Delete**: 모든 선택된 머신에 대해 삭제 수행 (상태 무관)
+  - **Power Actions** (Power 드롭다운):
+    - **Turn on**: 선택된 머신 중 Power가 off 상태인 머신에 대해 전원 켜기
+    - **Turn off**: 선택된 머신 중 Power가 on 상태인 머신에 대해 전원 끄기
+    - **Check Power**: 선택된 모든 머신에 대해 순차적으로 전원 상태 조회
 - **백엔드 API**:
   - **DELETE `/api/machines/{systemId}`**: 머신 삭제
     - 요청 파라미터: `maasUrl`, `apiKey`
@@ -583,13 +594,15 @@ MachinesTab.vue (실시간 UI 업데이트)
      - 백엔드 `/api/machines` POST 요청
      - 성공 시 머신 목록 새로고침
   4. **대량 등록 모드** (CSV):
+     - **중요 안내**: CSV를 통한 대량 등록 시 머신들은 자동으로 커미셔닝되지 않습니다. 머신 추가 후 수동으로 커미셔닝을 진행해야 합니다.
      - 샘플 CSV 파일 미리보기 및 다운로드
-       - CSV 헤더: hostname, architecture, mac_address, power_type, commission, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
+       - CSV 헤더: hostname, architecture, mac_address, power_type, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
+       - commission 컬럼은 포함되지 않음 (모든 머신이 commission=false로 추가됨)
        - 예시 데이터 2개 행 제공 (IPMI 예시, Manual 예시)
      - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
      - CSV 파일 검증 (2단계):
        - **1단계: CSV 내부 검증**
-         - 필수 필드 검증: hostname, architecture, mac_address, power_type, commission
+         - 필수 필드 검증: hostname, architecture, mac_address, power_type
          - power_type이 'ipmi'인 경우 추가 필수 필드: power_driver, power_boot_type, power_address, power_user, power_pass
          - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
          - power_mac_address 형식 검증 (빈 값이 아닌 경우 MAC 주소 형식 필수)
@@ -609,6 +622,12 @@ MachinesTab.vue (실시간 UI 업데이트)
        - 검증 실패 시: 선택된 CSV 파일 삭제, 버튼 텍스트는 "Validate"로 유지, 버튼 비활성화 (새 CSV 파일 선택 시까지)
        - CSV 파일 선택 제거 시 (X 버튼): 버튼 텍스트가 "Validate"로 리셋, 버튼 비활성화
        - "Upload & Process" 버튼 클릭 시: 대량 등록 처리 시작
+     - 대량 등록 완료 후:
+       - 진행 상황 모달의 Close 버튼 클릭 시:
+         - Cancel 버튼이 파란색 "Done" 버튼으로 변경
+         - "Upload & Process" 버튼은 비활성화됨
+         - 새로운 CSV 파일을 선택하거나 드래그 앤 드롭하여 추가 등록 가능
+         - 새 CSV 파일 선택 시 모든 상태가 리셋되어 원래 루틴으로 복귀
      - 대량 등록 처리:
        - 검증된 CSV 데이터를 순차적으로 처리 (1개씩)
        - 진행 상황 모달 표시:
@@ -632,18 +651,21 @@ MachinesTab.vue (실시간 UI 업데이트)
     - 모달 드래그 가능 (헤더를 드래그하여 이동)
     - 모달 바깥쪽 클릭 시 닫히지 않음 (Cancel 또는 X 버튼으로만 닫힘)
   - 대량 등록 모달:
-    - 샘플 CSV 미리보기 테이블 (실제 CSV 형식에 맞춘 16개 컬럼 표시)
-    - 샘플 CSV 다운로드 버튼 (실제 형식의 CSV 파일 다운로드)
+    - 상단에 중요 안내 메시지 표시 (파란색 정보 박스): "Machines added via CSV bulk upload will not be automatically commissioned. After adding machines, please manually commission them from the Machines tab."
+    - 샘플 CSV 미리보기 테이블 (실제 CSV 형식에 맞춘 15개 컬럼 표시, commission 컬럼 제외)
+    - 샘플 CSV 다운로드 버튼 (실제 형식의 CSV 파일 다운로드, commission 컬럼 제외)
     - 파일 업로드 영역 (드래그 앤 드롭 지원)
     - 선택된 파일 정보 표시 (이름, 크기)
     - 모달 드래그 가능
     - 모달 바깥쪽 클릭 시 닫히지 않음
     - 하단 버튼:
+      - "Cancel" 버튼: 모달 닫기 (등록 완료 후 "Done"으로 변경, 파란색)
       - "Validate" 버튼: CSV 파일 검증 실행 (파일 선택 시 활성화)
       - 검증 성공 시 "Upload & Process" 버튼으로 변경
       - 검증 실패 시 CSV 파일 삭제 및 버튼 비활성화 (새 파일 선택 시까지)
       - CSV 파일 선택 제거 시 버튼 텍스트 "Validate"로 리셋 및 비활성화
       - "Upload & Process" 버튼 클릭 시 대량 등록 처리 시작 (진행 상황 모달 표시)
+      - 등록 완료 후 "Upload & Process" 버튼은 비활성화되고, "Cancel" 버튼이 "Done"으로 변경됨
   - 검증 결과 모달:
     - 검증 상태 요약 (전체/유효/오류 행 수)
     - 오류 목록 (행 번호별 상세 오류 메시지)
@@ -798,48 +820,62 @@ MachinesTab.vue (실시간 UI 업데이트)
   - `ConfigurationTab.vue`: Cloud-Config 템플릿 관리
 - **내부 로직 흐름**:
   1. "Deploy" 버튼 클릭 (Ready 또는 Allocated 상태에서만 활성화)
-  2. Deploy 모달 표시
-  3. Deployable OS 목록 로드 (`/api/deployable-os` 호출, 최초 1회만)
-  4. Cloud-Config 템플릿 목록 로드 (백엔드 API에서)
-  5. 머신의 태그와 매칭되는 템플릿 자동 필터링
-  6. OS 목록 정렬 및 기본값 설정:
+  2. 네트워크 설정 확인:
+     - 머신의 네트워크 설정이 완료되지 않은 경우 확인 팝업 표시
+     - 확인 메시지: "네트워크 Configuration이 설정되지 않았습니다. 그래도 Deploy를 진행하시겠습니까?"
+     - 확인 클릭 시에만 Deploy 모달 표시
+  3. Deploy 모달 표시
+  4. Deployable OS 목록 로드 (`/api/deployable-os` 호출, 최초 1회만)
+  5. Cloud-Config 템플릿 목록 로드 (백엔드 API에서)
+  6. 머신의 태그와 매칭되는 템플릿 자동 필터링
+  7. OS 목록 정렬 및 기본값 설정:
      - OS 이름별로 그룹화
      - 각 OS별 최신 release를 기본값으로 자동 선택
      - OS 이름 → release (최신순) 정렬
-  7. 템플릿 목록 표시:
+  8. 템플릿 목록 표시:
      - "Recommended (matches machine tags)" 그룹: 머신 태그와 매칭되는 템플릿 우선 표시
      - "Other Templates" 그룹: 매칭되지 않은 템플릿
      - "None" 옵션: Cloud-Config 없이 배포
      - "Custom..." 옵션: 직접 Cloud-Config YAML 입력
-  8. 자동 템플릿 선택:
+  9. 자동 템플릿 선택:
      - 머신의 태그와 매칭되는 템플릿이 정확히 1개인 경우 자동으로 선택
      - 매칭되는 템플릿이 0개 또는 2개 이상인 경우 "None"이 기본값
-  9. 사용자가 OS 및 Cloud-Config 템플릿 선택:
+  10. 사용자가 OS 및 Cloud-Config 템플릿 선택:
      - OS는 필수 선택
      - Cloud-Config 템플릿은 선택사항 (None, 템플릿 선택, Custom)
-  10. 템플릿 선택 시 미리보기 표시
-  11. "Deploy" 버튼 클릭
-  12. Cloud-Config YAML 처리:
+  11. 템플릿 선택 시 미리보기 표시
+  12. "Deploy" 버튼 클릭
+  13. Cloud-Config YAML 처리:
      - 선택된 템플릿이 있으면 해당 템플릿의 Cloud-Config YAML 사용
      - Custom이 선택되었으면 사용자가 입력한 YAML 사용
      - YAML이 있으면 base64 인코딩하여 `userdata` 파라미터에 추가
-  13. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
+  14. 백엔드 `/api/machines/{systemId}/deploy` POST 요청
      - 요청 파라미터: `maasUrl`, `apiKey`, `os`, `release`, `arch`, `userdata` (선택)
      - `userdata`: base64 인코딩된 Cloud-Config YAML
-  14. 백엔드에서 Form Data 생성:
+  15. 백엔드에서 Form Data 생성:
      - `distro_series`: `os/release` 형식 (예: `ubuntu/noble`, `ubuntu/jammy`)
      - `architecture`: 선택된 architecture (있는 경우)
      - `user_data`: base64 인코딩된 Cloud-Config YAML (선택된 템플릿 또는 Custom YAML)
-  15. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
+  16. MAAS API `/MAAS/api/2.0/machines/{systemId}/op-deploy` POST 요청
      - **Form Data 형식 사용** (`application/x-www-form-urlencoded`)
      - `BodyInserters.fromFormData()` 사용
-  16. 성공 시:
+  17. 성공 시:
      - 모달 자동 닫기
      - 버튼이 "Abort"로 변경
      - 머신 상태가 "Deploying"으로 변경
      - 선택된 OS 정보 저장 (`deployingOS`, `deployingRelease`)
      - STATUS 컬럼에 OS 버전 표시 (예: "Ubuntu 24.04")
-  17. WebSocket을 통한 상태 업데이트 수신
+  18. WebSocket을 통한 상태 업데이트 수신
+- **네트워크 설정 확인**:
+  - Deploy 전에 머신의 네트워크 설정이 완료되었는지 확인
+  - 네트워크 설정 완료 조건:
+    - `interface_set`이 존재하고 비어있지 않음
+    - 최소 하나의 인터페이스에 VLAN 설정 (`vlan.id` 존재)
+    - 최소 하나의 인터페이스에 IP 주소 할당 (`links` 배열에 IP 주소 존재)
+  - 네트워크 설정이 완료되지 않은 경우:
+    - 개별 Deploy: 확인 팝업 표시 ("네트워크 Configuration이 설정되지 않았습니다. 그래도 Deploy를 진행하시겠습니까?")
+    - 다중 Deploy: 하나라도 네트워크 설정이 안 되어 있으면 확인 팝업 표시 ("일부 머신의 네트워크 Configuration이 설정되지 않았습니다. 설정되지 않은 머신: {머신 목록}. 그래도 Deploy를 진행하시겠습니까?")
+  - 확인 클릭 시에만 Deploy 모달 표시
 - **UI/UX 특징**:
   - Deploy 모달: OS 선택과 Cloud-Config 설정을 한 화면에서 처리
   - OS 선택 드롭다운: 기본값 OS 자동 선택
@@ -2629,13 +2665,15 @@ maas.default.api-key=consumer_key:token:token_secret
    - API 호출
    - 성공 시 모달 닫기 및 머신 목록 새로고침
 4. **대량 등록 모드** (CSV):
+   - **중요 안내**: CSV를 통한 대량 등록 시 머신들은 자동으로 커미셔닝되지 않습니다. 머신 추가 후 수동으로 커미셔닝을 진행해야 합니다.
    - 샘플 CSV 파일 확인 또는 다운로드
-     - CSV 헤더: hostname, architecture, mac_address, power_type, commission, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
+     - CSV 헤더: hostname, architecture, mac_address, power_type, description, power_driver, power_boot_type, power_address, power_user, power_pass, k_g, cipher_suite_id, privilege_level, workaround_flags, power_mac_address
+     - commission 컬럼은 포함되지 않음 (모든 머신이 commission=false로 추가됨)
      - 예시 데이터 2개 행 (IPMI 예시, Manual 예시)
    - CSV 파일 업로드 (드래그 앤 드롭 또는 파일 선택)
    - "Validate" 버튼 클릭하여 CSV 파일 검증:
      - **1단계: CSV 내부 검증**
-       - 필수 필드 검증 (hostname, architecture, mac_address, power_type, commission)
+       - 필수 필드 검증 (hostname, architecture, mac_address, power_type)
        - power_type이 'ipmi'인 경우 추가 필수 필드 검증
        - MAC 주소 형식 검증
        - power_mac_address 형식 검증 (빈 값이 아닌 경우)
@@ -2663,6 +2701,12 @@ maas.default.api-key=consumer_key:token:token_secret
      - 에러 발생 시 즉시 중단
      - 완료 리포트 표시 (전체/성공/실패 행 수, 에러 목록)
      - 리포트 모달 닫을 때 Machines 탭 자동 리로드
+   - 대량 등록 완료 후:
+     - 진행 상황 모달의 Close 버튼 클릭 시:
+       - Cancel 버튼이 파란색 "Done" 버튼으로 즉시 변경
+       - "Upload & Process" 버튼은 비활성화됨
+       - 새로운 CSV 파일을 선택하거나 드래그 앤 드롭하여 추가 등록 가능
+       - 새 CSV 파일 선택 시 모든 상태가 리셋되어 원래 루틴으로 복귀
 
 #### 커미셔닝 흐름
 1. Machines Tab에서 머신의 "Commission" 버튼 클릭
@@ -2683,10 +2727,30 @@ maas.default.api-key=consumer_key:token:token_secret
 9. 성공 시 인터페이스 정보 새로고침
 
 #### 배포 흐름
-1. Machines Tab에서 Ready/Allocated 상태 머신의 "Deploy" 버튼 클릭
-2. API 호출
-3. 버튼이 "Deployed"로 변경
-4. WebSocket을 통한 상태 업데이트 수신
+1. **개별 배포**:
+   - Machines Tab에서 Ready/Allocated 상태 머신의 "Deploy" 버튼 클릭
+   - 네트워크 설정 확인:
+     - 머신의 네트워크 설정이 완료되지 않은 경우 확인 팝업 표시
+     - 확인 메시지: "네트워크 Configuration이 설정되지 않았습니다. 그래도 Deploy를 진행하시겠습니까?"
+     - 확인 클릭 시에만 다음 단계 진행
+   - Deploy 모달 표시 (제목: "Deploy Machine - {hostname}")
+   - OS 및 Cloud-Config 선택 후 "Deploy" 버튼 클릭
+   - API 호출
+   - 버튼이 "Abort"로 변경
+   - 머신 상태가 "Deploying"으로 변경
+   - WebSocket을 통한 상태 업데이트 수신
+2. **다중 배포**:
+   - 머신 다중 선택 → Actions 드롭다운 → "Deploy..." 선택
+   - 네트워크 설정 확인:
+     - 선택된 머신 중 하나라도 네트워크 설정이 완료되지 않은 경우 확인 팝업 표시
+     - 확인 메시지: "일부 머신의 네트워크 Configuration이 설정되지 않았습니다. 설정되지 않은 머신: {머신 목록}. 그래도 Deploy를 진행하시겠습니까?"
+     - 확인 클릭 시에만 다음 단계 진행
+   - Deploy 모달 표시 (제목: "Deploy Multiple Machines")
+   - OS 및 Cloud-Config 선택 후 "Deploy" 버튼 클릭
+   - 선택된 모든 머신에 대해 순차적으로 배포 수행
+   - 각 머신의 버튼이 "Abort"로 변경
+   - 각 머신의 상태가 "Deploying"으로 변경
+   - WebSocket을 통한 상태 업데이트 수신
 
 ### 5.3 머신 상세 정보 모달 UI/UX 개선
 - **고정된 팝업 크기**: 모든 탭에서 동일한 크기 유지 (500px 높이)
@@ -2926,14 +2990,15 @@ java -jar target/maas-ui-backend-1.0-SNAPSHOT.jar
     - Power on/off 성공 시 WebSocket을 통해 상태 자동 업데이트 (페이지 리로드 없음)
     - Check power 성공 시 응답의 `state` 값으로 머신의 `power_state`만 업데이트 (다른 작업 수행 안 함)
   - **일괄 Power 작업**:
-    - 액션 바의 Power 드롭다운 메뉴에서 일괄 Power on/off 지원
+    - 액션 바의 Power 드롭다운 메뉴에서 일괄 Power on/off/Check Power 지원
     - 선택된 머신들의 Power 상태에 따라 메뉴 활성화/비활성화:
       - 모두 `off` 상태 → "Turn on..."만 활성화, "Turn off..." 비활성화
       - 모두 `on` 상태 → "Turn off..."만 활성화, "Turn on..." 비활성화
       - 혼재 상태 → 둘 다 비활성화
-    - `handleBulkPowerAction()`: 선택된 모든 머신에 대해 Power on/off API 호출
-    - 결과 요약 표시 (성공/실패 개수)
-    - WebSocket을 통해 상태 자동 업데이트 (페이지 리로드 없음)
+      - "Check Power..."는 항상 활성화 (모든 Power 상태에서 사용 가능)
+    - `handleBulkPowerAction()`: 선택된 모든 머신에 대해 Power on/off/Check Power API 호출
+    - Turn on/off: 결과 요약 표시 (성공/실패 개수)
+    - Check Power: 선택된 모든 머신에 대해 순차적으로 전원 상태 조회
     - WebSocket을 통해 상태 자동 업데이트 (페이지 리로드 없음)
   - **Check power 기능**:
     - MAAS에서 IPMI 상태 업데이트 주기가 길기 때문에 수동으로 전원 상태를 확인

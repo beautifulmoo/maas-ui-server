@@ -101,6 +101,12 @@
             >
               Turn off...
             </div>
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkPowerAction('check-power')"
+            >
+              Check Power...
+            </div>
           </div>
         </Teleport>
       </div>
@@ -572,7 +578,7 @@
           @mousedown="startDragDeployModal"
           :style="isDraggingDeployModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
-          <h3>Deploy Machine - {{ selectedDeployMachine?.hostname || selectedDeployMachine?.id }}</h3>
+          <h3>Deploy {{ isBulkDeploy ? 'Multiple Machines' : (selectedDeployMachine?.hostname || selectedDeployMachine?.id) }}</h3>
           <button class="close-btn" @click="closeDeployModal">&times;</button>
         </div>
         
@@ -2900,6 +2906,8 @@ export default {
     // Deploy Modal state
     const showDeployModalState = ref(false)
     const selectedDeployMachine = ref(null)
+    const selectedDeployMachines = ref([]) // 다중 선택된 머신들
+    const isBulkDeploy = ref(false) // 다중 Deploy 여부
     const selectedDeployOS = ref(null)
     const selectedCloudConfigTemplate = ref('none')
     const customCloudConfig = ref('')
@@ -5723,17 +5731,49 @@ export default {
       }
     }
     
+    // 머신의 네트워크 설정이 완료되었는지 확인
+    const isNetworkConfigured = (machine) => {
+      // interface_set이 없거나 비어있으면 네트워크 미설정
+      if (!machine.interface_set || !Array.isArray(machine.interface_set) || machine.interface_set.length === 0) {
+        return false
+      }
+      
+      // 최소 하나의 인터페이스에 VLAN과 IP가 설정되어 있어야 함
+      return machine.interface_set.some(iface => {
+        // VLAN이 설정되어 있는지 확인
+        const hasVlan = iface.vlan && (iface.vlan.id !== null && iface.vlan.id !== undefined)
+        
+        // IP 주소가 할당되어 있는지 확인 (links 배열에 IP가 있는지)
+        const hasIp = iface.links && Array.isArray(iface.links) && iface.links.length > 0 && 
+                      iface.links.some(link => link.ip_address && link.ip_address.trim() !== '')
+        
+        return hasVlan && hasIp
+      })
+    }
+    
     // Deploy 버튼 클릭 핸들러
-    const handleDeployButtonClick = (machine, event) => {
+    const handleDeployButtonClick = async (machine, event) => {
       console.log('Deploy button clicked for machine:', machine.id, machine.status)
       const status = machine.status?.toLowerCase() || ''
       if (status === 'deploying') {
         abortDeploy(machine)
       } else if (status === 'ready' || status === 'allocated') {
-        // Deploy 모달 표시
         if (event) {
           event.stopPropagation()
         }
+        
+        // 네트워크 설정 확인
+        if (!isNetworkConfigured(machine)) {
+          const confirmed = await customConfirm(
+            `네트워크 Configuration이 설정되지 않았습니다.\n\n그래도 Deploy를 진행하시겠습니까?`,
+            '네트워크 설정 확인'
+          )
+          if (!confirmed) {
+            return
+          }
+        }
+        
+        // Deploy 모달 표시
         showDeployModal(machine)
       }
     }
@@ -5788,6 +5828,8 @@ export default {
     // Deploy Modal Functions
     const showDeployModal = async (machine) => {
       selectedDeployMachine.value = machine
+      selectedDeployMachines.value = []
+      isBulkDeploy.value = false
       showDeployModalState.value = true
       selectedDeployOS.value = null
       selectedCloudConfigTemplate.value = 'none'
@@ -5834,18 +5876,78 @@ export default {
       }
     }
     
+    // 다중 Deploy를 위한 모달 표시
+    const showBulkDeployModal = async (machines) => {
+      // 네트워크 설정 확인 - 하나라도 네트워크 설정이 안 되어 있으면 확인 팝업 표시
+      const machinesWithoutNetwork = machines.filter(m => !isNetworkConfigured(m))
+      
+      if (machinesWithoutNetwork.length > 0) {
+        const machineNames = machinesWithoutNetwork.map(m => m.hostname || m.id).join(', ')
+        const confirmed = await customConfirm(
+          `일부 머신의 네트워크 Configuration이 설정되지 않았습니다.\n\n설정되지 않은 머신: ${machineNames}\n\n그래도 Deploy를 진행하시겠습니까?`,
+          '네트워크 설정 확인'
+        )
+        if (!confirmed) {
+          return
+        }
+      }
+      
+      selectedDeployMachine.value = null
+      selectedDeployMachines.value = machines
+      isBulkDeploy.value = true
+      showDeployModalState.value = true
+      selectedDeployOS.value = null
+      selectedCloudConfigTemplate.value = 'none'
+      customCloudConfig.value = ''
+      deployingMachine.value = false
+      
+      // Load cloud-config templates
+      loadCloudConfigTemplates()
+      
+      // OS 목록 로드
+      if (deployableOSList.value.length === 0 && !loadingDeployableOS.value) {
+        console.log('Loading deployable OS list...')
+        await loadDeployableOS()
+      }
+      
+      // 기본 OS 선택
+      if (deployableOSList.value.length > 0 && !selectedDeployOS.value) {
+        const defaultOS = deployableOSList.value.find(o => o.isDefault)
+        if (defaultOS) {
+          selectedDeployOS.value = defaultOS
+        } else {
+          selectedDeployOS.value = deployableOSList.value[0]
+        }
+      }
+    }
+    
     const closeDeployModal = () => {
       if (deployingMachine.value) return // 배포 중이면 닫기 방지
       showDeployModalState.value = false
       selectedDeployMachine.value = null
+      selectedDeployMachines.value = []
+      isBulkDeploy.value = false
       selectedDeployOS.value = null
       selectedCloudConfigTemplate.value = 'none'
       customCloudConfig.value = ''
     }
     
     const startDeployFromModal = async () => {
-      if (!selectedDeployMachine.value || !selectedDeployOS.value) {
+      if (!selectedDeployOS.value) {
         return
+      }
+      
+      // 단일 또는 다중 Deploy 확인
+      if (isBulkDeploy.value) {
+        // 다중 Deploy
+        if (selectedDeployMachines.value.length === 0) {
+          return
+        }
+      } else {
+        // 단일 Deploy
+        if (!selectedDeployMachine.value) {
+          return
+        }
       }
       
       // Cloud-Config YAML 또는 base64 인코딩된 값 가져오기
@@ -5867,7 +5969,24 @@ export default {
       
       deployingMachine.value = true
       try {
-        await deployMachine(selectedDeployMachine.value, selectedDeployOS.value, cloudConfigYaml, cloudConfigBase64)
+        if (isBulkDeploy.value) {
+          // 다중 머신에 대해 배포 수행
+          const deployableMachines = selectedDeployMachines.value.filter(m => 
+            m.status === 'ready' || m.status === 'allocated'
+          )
+          
+          for (const machine of deployableMachines) {
+            try {
+              await deployMachine(machine, selectedDeployOS.value, cloudConfigYaml, cloudConfigBase64)
+            } catch (err) {
+              console.error(`Error deploying machine ${machine.id}:`, err)
+            }
+          }
+        } else {
+          // 단일 머신 배포
+          await deployMachine(selectedDeployMachine.value, selectedDeployOS.value, cloudConfigYaml, cloudConfigBase64)
+        }
+        
         // 배포 시작 성공 시 모달 닫기
         deployingMachine.value = false
         closeDeployModal(true) // 강제로 닫기
@@ -6236,6 +6355,25 @@ export default {
         return
       }
       
+      // Check Power는 확인 메시지 후 순차적으로 처리
+      if (action === 'check-power') {
+        const confirmMessage = `선택된 ${selected.length}개의 머신의 전원 상태를 확인하시겠습니까?`
+        const confirmed = await customConfirm(confirmMessage, '일괄 Power 상태 확인')
+        if (!confirmed) {
+          return
+        }
+        
+        // 각 머신에 대해 Check Power 수행
+        for (const machine of selected) {
+          try {
+            await handleCheckPower(machine)
+          } catch (err) {
+            console.error(`Failed to check power for machine ${machine.id}:`, err)
+          }
+        }
+        return
+      }
+      
       // 확인 메시지
       const actionText = action === 'on' ? '켜기' : '끄기'
       const confirmMessage = `선택된 ${selected.length}개의 머신의 전원을 ${actionText} 하시겠습니까?`
@@ -6303,6 +6441,12 @@ export default {
         return
       }
       
+      // Deploy는 팝업을 통해 처리하므로 바로 팝업 표시
+      if (action === 'deploy') {
+        await showBulkDeployModal(selected)
+        return // 팝업에서 처리하므로 여기서 종료
+      }
+      
       // 확인 메시지
       let confirmMessage = ''
       switch (action) {
@@ -6311,9 +6455,6 @@ export default {
           break
         case 'allocate':
           confirmMessage = `선택된 ${selected.length}개의 머신을 Allocate 하시겠습니까?`
-          break
-        case 'deploy':
-          confirmMessage = `선택된 ${selected.length}개의 머신을 Deploy 하시겠습니까?`
           break
         case 'release':
           confirmMessage = `선택된 ${selected.length}개의 머신을 Release 하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
@@ -6342,10 +6483,8 @@ export default {
               console.log('Allocate is not implemented yet')
               break
             case 'deploy':
-              const deployStatus = machine.status?.toLowerCase() || ''
-              if (deployStatus === 'ready' || deployStatus === 'allocated') {
-                await deployMachine(machine)
-              }
+              // 다중 Deploy는 팝업을 통해 처리하므로 여기서는 아무것도 하지 않음
+              // handleBulkAction에서 별도로 처리됨
               break
             case 'release':
               const releaseStatus = machine.status?.toLowerCase() || ''
@@ -6356,6 +6495,9 @@ export default {
               break
             case 'abort':
               await abortMachine(machine)
+              break
+            case 'check-power':
+              await handleCheckPower(machine)
               break
           }
         } catch (err) {
@@ -8389,6 +8531,9 @@ export default {
         // Deploy Modal
         showDeployModalState,
         selectedDeployMachine,
+        selectedDeployMachines,
+        isBulkDeploy,
+        showBulkDeployModal,
         selectedDeployOS,
         selectedCloudConfigTemplate,
         customCloudConfig,
