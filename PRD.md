@@ -492,13 +492,14 @@ MachinesTab.vue (실시간 UI 업데이트)
   1. 사용자가 머신 체크박스를 선택하면 `selectedMachines` 배열에 머신 ID 추가
   2. `selectedMachines.length > 0`이 되면 액션 바가 화면 상단에 표시됨
   3. 액션 바 구성:
-     - **Actions 드롭다운**: Commission, Allocate, Deploy, Release, Abort
+     - **Actions 드롭다운**: Commission, Allocate, Deploy, Release, Abort, Apply Network Profile
      - **Power 드롭다운**: Turn on, Turn off, Check Power
      - **Delete 버튼**: 직접 클릭 가능
      - **선택된 머신 수 표시**: "X selected"
   4. Actions 드롭다운에서 액션 선택 시:
      - `handleBulkAction(action)` 호출
      - Deploy 액션의 경우: 확인 메시지 없이 바로 Deploy 모달 표시 (OS 및 Cloud-Config 선택)
+     - Apply Network Profile 액션의 경우: 확인 메시지 없이 바로 프로파일 선택 모달 표시
      - 다른 액션의 경우: 확인 메시지 표시 후 선택된 각 머신에 대해 해당 액션 수행 (상태 확인 후)
      - 각 머신의 상태에 따라 액션 가능 여부 판단
   5. Power 드롭다운에서 액션 선택 시:
@@ -517,6 +518,10 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **Allocate**: 현재 API 미구현으로 항상 비활성화
   - **Deploy**: Ready 또는 Allocated 상태인 머신만 처리, Deploy 모달을 통해 OS 및 Cloud-Config 선택 후 배포
     - 다중 선택 시에도 Deploy 모달 표시 (제목: "Deploy Multiple Machines")
+  - **Apply Network Profile**: 선택된 머신에 네트워크 프로파일 적용
+    - 프로파일 선택 모달 표시
+    - 프로파일 선택 후 확인 메시지 표시
+    - 각 머신의 인터페이스에 프로파일 설정 적용 (Fabric, Subnet)
     - 네트워크 설정 확인: 하나라도 네트워크 설정이 안 되어 있으면 확인 팝업 표시
     - 확인 메시지: "일부 머신의 네트워크 Configuration이 설정되지 않았습니다. 설정되지 않은 머신: {머신 목록}. 그래도 Deploy를 진행하시겠습니까?"
   - **Release**: Failed Deployment, Failed Disk Erasing, Deployed, 또는 Allocated 상태인 머신만 처리
@@ -804,6 +809,79 @@ MachinesTab.vue (실시간 UI 업데이트)
     - Fabric 변경 후 link가 없으면 `originalPrimaryLinkId`를 null로 설정하여 새 link 생성
   - **에러 처리**: unlink 실패 시 `console.warn`으로 경고만 출력하고 계속 진행하여, Fabric 변경과 IP Assignment 저장이 한 번에 완료되도록 구현되어 있습니다.
   - **동작**: Fabric 변경과 IP Assignment를 Static으로 설정하고 IP를 입력한 후 Save Changes를 한 번에 실행하면, unlink 실패가 있어도 Fabric 변경과 IP Assignment 저장이 모두 완료되어 2단계 작업이 1단계로 처리됩니다.
+
+#### 기능명: 네트워크 프로파일 관리 (Network Profile)
+- **설명**: 네트워크 설정을 프로파일로 저장하고 재사용하여 여러 머신에 일괄 적용할 수 있는 기능
+- **주요 기능**:
+  - 네트워크 설정을 프로파일로 저장
+  - 저장된 프로파일 목록 관리
+  - 프로파일을 단일 또는 다중 머신에 적용
+- **입력**:
+  - 프로파일 이름 (필수)
+  - 프로파일 설명 (선택)
+  - 현재 네트워크 설정 (인터페이스별 Fabric, Subnet, IP Assignment 모드)
+- **출력**: 저장된 프로파일 목록 및 적용 결과
+- **주요 코드 파일**:
+  - `MachinesTab.vue`: 네트워크 프로파일 관리 UI 및 로직
+  - localStorage: 프로파일 데이터 저장소 (`maas_network_profiles` 키)
+- **내부 로직 흐름**:
+  1. **프로파일 저장**:
+     - 네트워크 모달에서 "Save as Profile" 버튼 클릭
+     - 프로파일 이름 및 설명 입력
+     - 현재 네트워크 인터페이스 설정을 프로파일 형식으로 변환
+     - localStorage에 저장
+  2. **프로파일 관리**:
+     - 네트워크 모달에서 "Manage Profiles" 버튼 클릭
+     - 저장된 프로파일 목록 표시
+     - 프로파일 삭제 기능
+  3. **프로파일 적용**:
+     - **방법 1**: 네트워크 모달에서 "Apply Profile" 버튼 클릭 → 프로파일 선택 → 적용
+     - **방법 2**: "Manage Profiles" 모달에서 프로파일의 "Apply" 버튼 클릭
+     - **방법 3**: 머신 다중 선택 → Actions 드롭다운 → "Apply Network Profile..." 선택
+     - 프로파일 적용 시:
+       - 인터페이스 이름으로 매칭 (같은 이름의 인터페이스에 프로파일 적용)
+       - Fabric 설정 (프로파일에 지정된 Fabric으로 VLAN 업데이트)
+       - Subnet 링크 (Automatic 모드로 설정, IP는 자동 할당되거나 사용자가 나중에 입력)
+       - IP 주소는 프로파일 적용 시 설정하지 않음 (사용자가 나중에 수동으로 입력)
+- **프로파일 데이터 구조**:
+  ```json
+  {
+    "id": "프로파일 고유 ID",
+    "name": "프로파일 이름",
+    "description": "프로파일 설명",
+    "interfaces": [
+      {
+        "name": "인터페이스 이름",
+        "fabricId": "Fabric ID",
+        "ipAssignment": "IP Assignment 모드 (unconfigured/automatic/static)",
+        "primarySubnetId": "Primary Subnet ID",
+        "primarySubnetCidr": "Primary Subnet CIDR",
+        "secondaryIpAddresses": []
+      }
+    ],
+    "createdAt": "생성일시 (ISO 8601)",
+    "updatedAt": "수정일시 (ISO 8601)"
+  }
+  ```
+- **프로파일 적용 규칙**:
+  - 프로파일의 인터페이스 이름과 머신의 인터페이스 이름이 일치하는 경우에만 적용
+  - Fabric은 프로파일에 지정된 값으로 설정
+  - Subnet은 Automatic 모드로 링크 (IP 주소는 null로 설정하여 자동 할당)
+  - IP 주소는 프로파일 적용 시 설정하지 않으며, 사용자가 네트워크 모달에서 나중에 입력 가능
+  - Secondary IP는 프로파일 적용 시 설정하지 않음 (필요시 사용자가 나중에 추가)
+- **버튼 활성화 조건**:
+  - "Save as Profile": 네트워크 인터페이스가 있고 저장 중이 아닐 때 활성화 (파란색)
+  - "Manage Profiles": 저장된 프로파일이 있을 때 활성화 (파란색)
+  - "Apply Profile": 프로파일이 있고 머신이 선택되어 있을 때 활성화 (파란색)
+- **에러 처리**:
+  - 프로파일 저장 실패 시 에러 메시지 표시
+  - 프로파일 적용 시 Fabric 또는 Subnet을 찾지 못한 경우 경고만 표시하고 계속 진행
+  - 인터페이스 매칭 실패 시 해당 인터페이스는 건너뛰고 다음 인터페이스 처리
+- **특수 기능**:
+  - **인터페이스 이름 기반 매칭**: 프로파일의 인터페이스 이름과 머신의 인터페이스 이름을 비교하여 매칭
+  - **Fabric 설정 재사용**: `saveNetworkChanges` 함수의 검증된 로직을 재사용하여 안정적인 Fabric 설정
+  - **자동 할당 모드**: 프로파일 적용 시 IP는 자동 할당 모드로 설정하여 사용자가 나중에 입력할 수 있도록 함
+  - **프로파일 적용 후 네트워크 모달 새로고침**: 프로파일 적용 후 네트워크 모달이 열려있으면 인터페이스 정보 자동 새로고침
 
 #### 기능명: 머신 배포 (Deploy)
 - **설명**: 커미셔닝된 머신에 OS를 배포하며, Cloud-Config 템플릿을 선택하여 userdata를 설정할 수 있습니다
@@ -1319,6 +1397,13 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **저장 가능 상태**: Ready, Allocated 상태에서만 네트워크 변경사항 저장 가능
 - **저장 불가 상태**: New, Deployed, Failed 상태에서는 모달은 열리지만 "Save Changes" 버튼이 비활성화됨
 - **진행 중 상태**: Commissioning, Deploying, Disk Erasing 상태에서는 버튼 자체가 비활성화
+
+**네트워크 모달 버튼**:
+- **Cancel**: 모달 닫기
+- **Manage Profiles**: 저장된 프로파일이 있을 때 활성화 (파란색), 프로파일 목록 관리 모달 표시
+- **Save as Profile**: 네트워크 인터페이스가 있고 저장 중이 아닐 때 활성화 (파란색), 현재 설정을 프로파일로 저장
+- **Apply Profile**: 프로파일이 있고 머신이 선택되어 있을 때 활성화 (파란색), 프로파일 선택 모달 표시
+- **Save Changes**: Ready, Allocated 상태에서만 활성화, 네트워크 변경사항 저장
 
 #### Deploy 버튼 동작
 
@@ -2726,6 +2811,33 @@ maas.default.api-key=consumer_key:token:token_secret
 8. API 호출 (VLAN 업데이트, Subnet 링크)
 9. 성공 시 인터페이스 정보 새로고침
 
+#### 네트워크 프로파일 흐름
+1. **프로파일 저장**:
+   - 네트워크 모달에서 네트워크 설정 완료
+   - "Save as Profile" 버튼 클릭
+   - 프로파일 이름 및 설명 입력
+   - 프로파일 저장 (localStorage)
+2. **프로파일 적용 (방법 1: 네트워크 모달)**:
+   - 네트워크 모달에서 "Apply Profile" 버튼 클릭
+   - 프로파일 선택 모달 표시
+   - 프로파일 선택 후 "Apply Profile" 버튼 클릭
+   - 확인 메시지 표시 후 적용
+3. **프로파일 적용 (방법 2: Manage Profiles)**:
+   - 네트워크 모달에서 "Manage Profiles" 버튼 클릭
+   - 프로파일 목록에서 원하는 프로파일의 "Apply" 버튼 클릭
+   - 확인 메시지 표시 후 적용
+4. **프로파일 적용 (방법 3: Actions 드롭다운)**:
+   - 머신 다중 선택
+   - Actions 드롭다운에서 "Apply Network Profile..." 선택
+   - 프로파일 선택 모달 표시
+   - 프로파일 선택 후 "Apply Profile" 버튼 클릭
+   - 확인 메시지 표시 후 적용
+5. **프로파일 적용 처리**:
+   - 각 머신의 인터페이스와 프로파일의 인터페이스를 이름으로 매칭
+   - Fabric 설정 (프로파일에 지정된 Fabric으로 VLAN 업데이트)
+   - Subnet 링크 (Automatic 모드, IP는 자동 할당)
+   - 네트워크 모달이 열려있으면 인터페이스 정보 새로고침
+
 #### 배포 흐름
 1. **개별 배포**:
    - Machines Tab에서 Ready/Allocated 상태 머신의 "Deploy" 버튼 클릭
@@ -3207,7 +3319,6 @@ Fabric (물리적 네트워크)
 ---
 
 ## 문서 버전 정보
-- **작성일**: 2024년
-- **버전**: 1.0
-- **작성자**: 시스템 리서처 및 PRD 테크 리포터
+- **작성일**: 2026년 01월 07일
+- **버전**: 1.0.1
 

@@ -62,6 +62,12 @@
             >
               Abort...
             </div>
+            <div 
+              class="action-bar-dropdown-item"
+              @click="handleBulkAction('apply-network-profile')"
+            >
+              Apply Network Profile...
+            </div>
           </div>
         </Teleport>
       </div>
@@ -890,9 +896,202 @@
             <button type="button" class="btn-secondary" @click="closeNetworkModal">
               Cancel
             </button>
+            <button 
+              type="button" 
+              :class="canManageProfiles ? 'btn-primary' : 'btn-secondary'" 
+              @click="showNetworkProfileManagementModal"
+              :disabled="!canManageProfiles"
+            >
+              Manage Profiles
+            </button>
+            <button 
+              type="button" 
+              :class="canSaveProfile ? 'btn-primary' : 'btn-secondary'" 
+              @click="showSaveProfileModalDialog" 
+              :disabled="!canSaveProfile"
+            >
+              Save as Profile
+            </button>
+            <button 
+              type="button" 
+              :class="canApplyProfile ? 'btn-primary' : 'btn-secondary'" 
+              @click="showApplyProfileModalDialog([selectedMachine])"
+              :disabled="!canApplyProfile"
+            >
+              Apply Profile
+            </button>
             <button type="button" class="btn-primary" @click="saveNetworkChanges" :disabled="savingNetwork || !canSaveNetworkChanges(selectedMachine)">
               <span v-if="savingNetwork">Saving...</span>
               <span v-else>Save Changes</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save Network Profile Modal -->
+    <div v-if="showSaveProfileModal" class="modal-overlay" @click="showSaveProfileModal = false">
+      <div class="modal-content" @click.stop style="max-width: 500px;">
+        <div class="modal-header">
+          <h3>Save Network Profile</h3>
+          <button class="close-btn" @click="showSaveProfileModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Profile Name <span style="color: red;">*</span></label>
+            <input 
+              type="text" 
+              v-model="newProfileName"
+              class="form-input"
+              placeholder="Enter profile name"
+            >
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea 
+              v-model="newProfileDescription"
+              class="form-input"
+              placeholder="Enter profile description (optional)"
+              rows="3"
+            ></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-secondary" @click="showSaveProfileModal = false">
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              class="btn-primary" 
+              @click="createNetworkProfile" 
+              :disabled="!newProfileName.trim() || savingProfile"
+            >
+              <span v-if="savingProfile">Saving...</span>
+              <span v-else>Save Profile</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Network Profile Management Modal -->
+    <div v-if="showNetworkProfileModal" class="modal-overlay" @click="showNetworkProfileModal = false">
+      <div class="modal-content" @click.stop style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-header">
+          <h3>Network Profile Management</h3>
+          <button class="close-btn" @click="showNetworkProfileModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="networkProfiles.length === 0" class="no-profiles">
+            <p>저장된 네트워크 프로파일이 없습니다.</p>
+            <p style="font-size: 0.9em; color: #666;">네트워크 설정 모달에서 "Save as Profile" 버튼을 사용하여 프로파일을 생성할 수 있습니다.</p>
+          </div>
+          <div v-else class="profiles-list">
+            <div 
+              v-for="profile in networkProfiles" 
+              :key="profile.id"
+              class="profile-item"
+            >
+              <div class="profile-header">
+                <div class="profile-info">
+                  <h4>{{ profile.name }}</h4>
+                  <p v-if="profile.description" class="profile-description">{{ profile.description }}</p>
+                  <p class="profile-meta">
+                    Created: {{ new Date(profile.createdAt).toLocaleString() }}
+                    <span v-if="profile.interfaces"> | {{ profile.interfaces.length }} interface(s)</span>
+                  </p>
+                </div>
+                <div class="profile-actions">
+                  <button 
+                    type="button" 
+                    class="btn-primary btn-sm" 
+                    @click="applyProfileFromManagement(profile)"
+                    title="Apply Profile"
+                    :disabled="applyingProfile"
+                  >
+                    <span v-if="applyingProfile">Applying...</span>
+                    <span v-else>Apply</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    class="btn-danger btn-sm" 
+                    @click="deleteNetworkProfile(profile.id)"
+                    title="Delete Profile"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <div v-if="profile.interfaces && profile.interfaces.length > 0" class="profile-interfaces">
+                <div 
+                  v-for="(iface, idx) in profile.interfaces" 
+                  :key="idx"
+                  class="profile-interface-item"
+                >
+                  <strong>{{ iface.name || `Interface ${idx + 1}` }}</strong>
+                  <div class="interface-details">
+                    <span v-if="iface.fabricId !== null && iface.fabricId !== -1">
+                      Fabric: {{ iface.fabricId }}
+                    </span>
+                    <span> | IP Assignment: {{ iface.ipAssignment }}</span>
+                    <span v-if="iface.ipAssignment === 'static' && iface.primaryIpAddress">
+                      | Primary IP: {{ iface.primaryIpAddress }}
+                    </span>
+                    <span v-if="iface.secondaryIpAddresses && iface.secondaryIpAddresses.length > 0">
+                      | Secondary IPs: {{ iface.secondaryIpAddresses.length }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Apply Network Profile Modal -->
+    <div v-if="showApplyProfileModal" class="modal-overlay" @click="showApplyProfileModal = false">
+      <div class="modal-content" @click.stop style="max-width: 600px;">
+        <div class="modal-header">
+          <h3>Apply Network Profile</h3>
+          <button class="close-btn" @click="showApplyProfileModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Select Profile</label>
+            <select 
+              v-model="selectedProfileForApply" 
+              class="form-select"
+            >
+              <option :value="null">Select a profile...</option>
+              <option 
+                v-for="profile in networkProfiles" 
+                :key="profile.id"
+                :value="profile"
+              >
+                {{ profile.name }} {{ profile.description ? `- ${profile.description}` : '' }}
+              </option>
+            </select>
+          </div>
+          <div v-if="selectedProfileForApply" class="profile-preview">
+            <h4>Profile Preview:</h4>
+            <div class="preview-content">
+              <p><strong>Name:</strong> {{ selectedProfileForApply.name }}</p>
+              <p v-if="selectedProfileForApply.description"><strong>Description:</strong> {{ selectedProfileForApply.description }}</p>
+              <p><strong>Interfaces:</strong> {{ selectedProfileForApply.interfaces?.length || 0 }}</p>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-secondary" @click="showApplyProfileModal = false">
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              class="btn-primary" 
+              @click="applyProfileFromManagement(selectedProfileForApply)"
+              :disabled="!selectedProfileForApply || applyingProfile"
+            >
+              <span v-if="applyingProfile">Applying...</span>
+              <span v-else>Apply Profile</span>
             </button>
           </div>
         </div>
@@ -3531,6 +3730,18 @@ export default {
     const fabricVlanIdsMap = ref({}) // fabric id -> [vlan_id, ...] mapping (fabric에 속한 모든 vlan_id 목록)
     const globalFabricsMap = ref({}) // fabric id -> fabric name mapping (전역 fabric 목록)
     
+    // Network Profile
+    const showNetworkProfileModal = ref(false)
+    const networkProfiles = ref([])
+    const showSaveProfileModal = ref(false)
+    const newProfileName = ref('')
+    const newProfileDescription = ref('')
+    const savingProfile = ref(false)
+    const applyingProfile = ref(false)
+    const selectedProfileForApply = ref(null)
+    const showApplyProfileModal = ref(false)
+    const machinesForProfileApply = ref([]) // 프로파일 적용할 머신 목록 저장
+    
     const filteredMachines = computed(() => {
       let filtered = machines.value
       
@@ -5533,6 +5744,21 @@ export default {
       return status === 'ready' || status === 'allocated'
     }
     
+    // 프로파일 저장 가능 여부 (네트워크 인터페이스가 있고 저장 중이 아닐 때)
+    const canSaveProfile = computed(() => {
+      return !savingNetwork.value && networkInterfaces.value.length > 0
+    })
+    
+    // 프로파일 관리 가능 여부 (저장된 프로파일이 있을 때)
+    const canManageProfiles = computed(() => {
+      return networkProfiles.value.length > 0
+    })
+    
+    // 프로파일 적용 가능 여부 (프로파일이 있고 머신이 선택되어 있을 때)
+    const canApplyProfile = computed(() => {
+      return networkProfiles.value.length > 0 && selectedMachine.value !== null
+    })
+    
     // Polling removed - will be replaced with WebSocket implementation
     
     const commissionMachine = async (machine) => {
@@ -6444,6 +6670,12 @@ export default {
       // Deploy는 팝업을 통해 처리하므로 바로 팝업 표시
       if (action === 'deploy') {
         await showBulkDeployModal(selected)
+        return // 팝업에서 처리하므로 여기서 종료
+      }
+      
+      // Apply Network Profile은 팝업을 통해 처리하므로 바로 팝업 표시
+      if (action === 'apply-network-profile') {
+        showApplyProfileModalDialog(selected)
         return // 팝업에서 처리하므로 여기서 종료
       }
       
@@ -8140,6 +8372,559 @@ export default {
       }
     }
     
+    // Network Profile Functions
+    const NETWORK_PROFILES_STORAGE_KEY = 'maas_network_profiles'
+    
+    // Load network profiles from localStorage
+    const loadNetworkProfiles = () => {
+      try {
+        const stored = localStorage.getItem(NETWORK_PROFILES_STORAGE_KEY)
+        if (stored) {
+          networkProfiles.value = JSON.parse(stored)
+        } else {
+          networkProfiles.value = []
+        }
+      } catch (err) {
+        console.error('Error loading network profiles:', err)
+        networkProfiles.value = []
+      }
+    }
+    
+    // Save network profiles to localStorage
+    const saveNetworkProfiles = () => {
+      try {
+        localStorage.setItem(NETWORK_PROFILES_STORAGE_KEY, JSON.stringify(networkProfiles.value))
+      } catch (err) {
+        console.error('Error saving network profiles:', err)
+        throw err
+      }
+    }
+    
+    // Create a network profile from current network configuration
+    const createNetworkProfile = () => {
+      if (!networkInterfaces.value || networkInterfaces.value.length === 0) {
+        alert('저장할 네트워크 설정이 없습니다.')
+        return
+      }
+      
+      // 현재 네트워크 설정을 프로파일 형식으로 변환
+      const profileInterfaces = networkInterfaces.value.map(iface => {
+        const profileInterface = {
+          name: iface.name,
+          fabricId: iface.editableFabric,
+          ipAssignment: iface.ipAssignment,
+          primaryIpAddress: iface.primaryIpAddress || '',
+          secondaryIpAddresses: (iface.secondaryIpAddresses || []).map(secIp => ({
+            address: secIp.address || '',
+            subnetId: secIp.subnet?.id || null,
+            subnetCidr: secIp.subnet?.cidr || ''
+          }))
+        }
+        
+        // Subnet 정보도 저장 (프로파일 적용 시 사용)
+        if (iface.matchedSubnet) {
+          profileInterface.primarySubnetId = iface.matchedSubnet.id
+          profileInterface.primarySubnetCidr = iface.matchedSubnet.cidr
+        }
+        
+        return profileInterface
+      })
+      
+      const newProfile = {
+        id: Date.now().toString(),
+        name: newProfileName.value.trim(),
+        description: newProfileDescription.value.trim(),
+        interfaces: profileInterfaces,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+      
+      networkProfiles.value.push(newProfile)
+      saveNetworkProfiles()
+      
+      // Reset form
+      newProfileName.value = ''
+      newProfileDescription.value = ''
+      showSaveProfileModal.value = false
+      
+      // Show success message
+      alert(`네트워크 프로파일 "${newProfile.name}"이(가) 저장되었습니다.`)
+    }
+    
+    // Show save profile modal
+    const showSaveProfileModalDialog = () => {
+      if (!networkInterfaces.value || networkInterfaces.value.length === 0) {
+        alert('저장할 네트워크 설정이 없습니다.')
+        return
+      }
+      
+      newProfileName.value = ''
+      newProfileDescription.value = ''
+      showSaveProfileModal.value = true
+    }
+    
+    // Delete network profile
+    const deleteNetworkProfile = (profileId) => {
+      if (!confirm('이 프로파일을 삭제하시겠습니까?')) {
+        return
+      }
+      
+      const index = networkProfiles.value.findIndex(p => p.id === profileId)
+      if (index !== -1) {
+        networkProfiles.value.splice(index, 1)
+        saveNetworkProfiles()
+      }
+    }
+    
+    // Show network profile management modal
+    const showNetworkProfileManagementModal = () => {
+      loadNetworkProfiles()
+      showNetworkProfileModal.value = true
+    }
+    
+    // Apply network profile to machine(s)
+    const applyNetworkProfile = async (profile, machines) => {
+      if (!profile || !machines || machines.length === 0) {
+        return
+      }
+      
+      applyingProfile.value = true
+      
+      try {
+        const apiParams = settingsStore.getApiParams.value
+        
+        // Fabric과 Subnet 목록 로드 (showNetworkModal과 동일한 방식)
+        try {
+          const fabricsResponse = await axios.get('http://localhost:8081/api/fabrics', {
+            params: apiParams
+          })
+          
+          if (fabricsResponse.data && fabricsResponse.data.results) {
+            // showNetworkModal과 동일한 방식으로 Fabric 로드
+            availableFabrics.value = fabricsResponse.data.results.map(fabric => {
+              // vlans 배열에서 첫 번째 vlan의 id 추출 (showNetworkModal과 동일)
+              let vlanId = null
+              if (fabric.vlans && Array.isArray(fabric.vlans) && fabric.vlans.length > 0) {
+                vlanId = fabric.vlans[0].id
+                // 타입을 숫자로 통일 (문자열이면 숫자로 변환)
+                if (typeof vlanId === 'string') {
+                  vlanId = parseInt(vlanId, 10)
+                }
+              }
+              
+              return {
+                id: fabric.id,
+                name: fabric.name || `fabric-${fabric.id}`,
+                vlan_id: vlanId
+              }
+            })
+            
+            console.log(`[Apply Profile] Fabrics loaded:`, availableFabrics.value.map(f => ({ id: f.id, name: f.name, vlan_id: f.vlan_id })))
+          } else {
+            console.warn('[Apply Profile] No fabrics found in response')
+            availableFabrics.value = []
+          }
+          
+          const subnetsResponse = await axios.get('http://localhost:8081/api/subnets', {
+            params: apiParams
+          })
+          
+          if (subnetsResponse.data && subnetsResponse.data.results) {
+            availableSubnets.value = subnetsResponse.data.results.map(subnet => {
+              let vlanId = subnet.vlan?.id || subnet.vlan_id
+              // 타입을 숫자로 통일 (문자열이면 숫자로 변환)
+              if (vlanId !== null && vlanId !== undefined) {
+                if (typeof vlanId === 'string') {
+                  vlanId = parseInt(vlanId, 10)
+                }
+              }
+              return {
+                id: subnet.id,
+                name: subnet.name,
+                cidr: subnet.cidr,
+                vlan_id: vlanId
+              }
+            })
+            
+            console.log(`[Apply Profile] Subnets loaded:`, availableSubnets.value.map(s => ({ id: s.id, cidr: s.cidr, vlan_id: s.vlan_id })))
+          } else {
+            console.warn('[Apply Profile] No subnets found in response')
+            availableSubnets.value = []
+          }
+        } catch (err) {
+          console.error('[Apply Profile] Error loading fabrics/subnets:', err)
+          throw new Error('Failed to load network configuration data')
+        }
+        
+        // 각 머신에 대해 프로파일 적용
+        for (const machine of machines) {
+          try {
+            console.log(`[Apply Profile] ===== Processing machine: ${machine.id} (${machine.hostname || machine.id}) =====`)
+            console.log(`[Apply Profile] Profile data:`, {
+              profileName: profile.name,
+              profileInterfaces: profile.interfaces.map(i => ({
+                name: i.name,
+                fabricId: i.fabricId,
+                primarySubnetId: i.primarySubnetId
+              }))
+            })
+            
+            // 머신의 최신 정보 가져오기
+            const machineResponse = await axios.get(`http://localhost:8081/api/machines/${machine.id}`, {
+              params: apiParams
+            })
+            
+            if (machineResponse.data && machineResponse.data.error) {
+              throw new Error(machineResponse.data.error)
+            }
+            
+            const latestMachine = machineResponse.data
+            if (!latestMachine || !latestMachine.interface_set) {
+              throw new Error('Failed to fetch machine network information')
+            }
+            
+            console.log(`[Apply Profile] Machine interfaces:`, latestMachine.interface_set.map(i => ({
+              id: i.id,
+              name: i.name,
+              currentFabricId: i.vlan?.fabric_id,
+              currentVlanId: i.vlan?.id
+            })))
+            
+            // showNetworkModal과 동일한 방식으로 네트워크 인터페이스 로드
+            // Fabric과 Subnet 목록은 이미 로드되어 있음
+            
+            // 머신 인터페이스를 networkInterfaces 형식으로 변환 (showNetworkModal 로직 재사용)
+            const machineInterfaces = latestMachine.interface_set
+            const profileInterfaces = profile.interfaces
+            
+            console.log(`[Apply Profile] Profile interfaces:`, profileInterfaces.map(pi => ({
+              name: pi.name,
+              fabricId: pi.fabricId,
+              fabricIdType: typeof pi.fabricId,
+              primarySubnetId: pi.primarySubnetId
+            })))
+            
+            // showNetworkModal과 동일한 방식으로 networkInterfaces 변환
+            const tempNetworkInterfaces = machineInterfaces.map(iface => {
+              // 현재 인터페이스의 VLAN에서 Fabric ID 추출 (showNetworkModal과 동일)
+              let fabricId = null
+              if (iface.vlan && iface.vlan.fabric_id !== null && iface.vlan.fabric_id !== undefined) {
+                fabricId = iface.vlan.fabric_id
+                if (typeof fabricId === 'string') {
+                  const numId = parseInt(fabricId, 10)
+                  if (!isNaN(numId)) {
+                    fabricId = numId
+                  }
+                }
+              }
+              
+              // 프로파일에서 해당 인터페이스 찾기 (이름으로 매칭)
+              const profileInterface = profileInterfaces.find(pIface => {
+                const nameMatch = pIface.name === iface.name || 
+                                 (pIface.name && iface.name && pIface.name.toLowerCase() === iface.name.toLowerCase())
+                if (nameMatch) {
+                  console.log(`[Apply Profile] ✓ Matched profile interface "${pIface.name}" (fabricId: ${pIface.fabricId}, type: ${typeof pIface.fabricId}) to machine interface "${iface.name}" (current fabricId: ${fabricId})`)
+                }
+                return nameMatch
+              })
+              
+              if (!profileInterface) {
+                console.log(`[Apply Profile] ✗ No profile match for machine interface "${iface.name}"`)
+              }
+              
+              // 프로파일에서 Fabric ID 가져오기
+              let targetFabricId = fabricId // 기본값은 현재 Fabric ID
+              if (profileInterface && profileInterface.fabricId !== null && profileInterface.fabricId !== undefined && profileInterface.fabricId !== -1) {
+                targetFabricId = Number(profileInterface.fabricId)
+                console.log(`[Apply Profile] Setting target fabricId to ${targetFabricId} for interface ${iface.name} (from profile)`)
+              }
+              
+              // Subnet 찾기
+              let matchedSubnet = null
+              if (profileInterface && profileInterface.primarySubnetId) {
+                matchedSubnet = availableSubnets.value.find(s => 
+                  s.id === profileInterface.primarySubnetId ||
+                  String(s.id) === String(profileInterface.primarySubnetId) ||
+                  Number(s.id) === Number(profileInterface.primarySubnetId)
+                )
+                if (matchedSubnet) {
+                  console.log(`[Apply Profile] Found matched subnet ${matchedSubnet.id} (${matchedSubnet.cidr}) for interface ${iface.name}`)
+                } else {
+                  console.warn(`[Apply Profile] Subnet ${profileInterface.primarySubnetId} not found for interface ${iface.name}`)
+                }
+              }
+              
+              return {
+                ...iface,
+                editableFabric: targetFabricId,
+                originalFabricId: fabricId,
+                ipAssignment: 'automatic', // Subnet만 설정하므로 Automatic
+                originalIpAssignment: iface.links && iface.links.length > 0 ? 'static' : 'unconfigured',
+                primaryIpAddress: '',
+                originalPrimaryIpAddress: iface.links && iface.links.length > 0 && iface.links[0].ip_address ? iface.links[0].ip_address : '',
+                originalPrimaryLinkId: iface.links && iface.links.length > 0 ? iface.links[0].id : null,
+                secondaryIpAddresses: [],
+                matchedSubnet: matchedSubnet
+              }
+            })
+            
+            console.log(`[Apply Profile] Converted networkInterfaces:`, tempNetworkInterfaces.map(ni => ({
+              name: ni.name,
+              id: ni.id,
+              originalFabricId: ni.originalFabricId,
+              editableFabric: ni.editableFabric,
+              fabricChanged: ni.originalFabricId !== ni.editableFabric
+            })))
+            
+            // saveNetworkChanges의 Fabric 저장 로직을 재사용
+            for (const networkInterface of tempNetworkInterfaces) {
+              const interfaceId = networkInterface.id
+              const interfaceName = networkInterface.name || interfaceId
+              
+              if (!interfaceId) {
+                console.warn(`[Apply Profile] Interface ID가 없습니다:`, networkInterface)
+                continue
+              }
+              
+              const interfaceIdStr = String(interfaceId)
+              const originalFabricId = networkInterface.originalFabricId
+              const newFabricId = networkInterface.editableFabric
+              
+              // Fabric이 변경되었는지 확인
+              const fabricChangedFlag = originalFabricId !== null && 
+                                       newFabricId !== null && 
+                                       newFabricId !== undefined && 
+                                       newFabricId !== '' &&
+                                       newFabricId !== -1 &&
+                                       (Number(originalFabricId) !== Number(newFabricId))
+              
+              if (fabricChangedFlag || (originalFabricId === null && newFabricId !== null && newFabricId !== undefined && newFabricId !== '' && newFabricId !== -1)) {
+                console.log(`[Apply Profile] Fabric changed for interface ${interfaceName}: originalFabricId=${originalFabricId}, newFabricId=${newFabricId}`)
+                
+                // 기존 IP 링크 제거 (Fabric 변경 시)
+                if (networkInterface.originalPrimaryLinkId) {
+                  try {
+                    await axios.post(
+                      `http://localhost:8081/api/machines/${machine.id}/interfaces/${interfaceIdStr}/unlink-subnet`,
+                      null,
+                      {
+                        params: {
+                          maasUrl: apiParams.maasUrl,
+                          apiKey: apiParams.apiKey,
+                          linkId: networkInterface.originalPrimaryLinkId
+                        }
+                      }
+                    )
+                  } catch (err) {
+                    console.warn(`[Apply Profile] Failed to unlink existing IP link:`, err)
+                    // 계속 진행
+                  }
+                }
+                
+                // 새로운 fabric로 VLAN 업데이트 (saveNetworkChanges와 동일한 로직)
+                if (newFabricId !== null && newFabricId !== undefined && newFabricId !== '') {
+                  console.log(`[Apply Profile] Saving fabric for interface ${interfaceId}: editableFabric=${newFabricId} (${typeof newFabricId})`)
+                  const fabric = availableFabrics.value.find(f => 
+                    f.id === newFabricId || 
+                    String(f.id) === String(newFabricId) ||
+                    Number(f.id) === Number(newFabricId)
+                  )
+                  
+                  if (fabric && fabric.vlan_id) {
+                    const vlanId = String(fabric.vlan_id)
+                    
+                    console.log(`[Apply Profile] Updating VLAN for interface ${interfaceIdStr}: vlanId=${vlanId}`)
+                  
+                    const vlanResponse = await axios.put(
+                      `http://localhost:8081/api/machines/${machine.id}/interfaces/${interfaceIdStr}/vlan`,
+                      null,
+                      {
+                        params: {
+                          maasUrl: apiParams.maasUrl,
+                          apiKey: apiParams.apiKey,
+                          vlanId: vlanId
+                        }
+                      }
+                    )
+                    
+                    if (!vlanResponse.data || !vlanResponse.data.success) {
+                      throw new Error(`Failed to update VLAN for interface ${interfaceName}: ${vlanResponse.data?.error || 'Unknown error'}`)
+                    }
+                    
+                    console.log(`[Apply Profile] VLAN updated successfully for interface ${interfaceId}`)
+                  } else {
+                    console.warn(`[Apply Profile] Fabric ${newFabricId} not found or has no vlan_id`)
+                  }
+                }
+              }
+              
+              // Subnet 설정 (IP는 자동 할당 모드)
+              const profileInterface = profileInterfaces.find(pIface => 
+                pIface.name === networkInterface.name || 
+                (pIface.name && networkInterface.name && pIface.name.toLowerCase() === networkInterface.name.toLowerCase())
+              )
+              
+              if (profileInterface && profileInterface.primarySubnetId) {
+                // Subnet ID가 유효한지 확인
+                const subnet = availableSubnets.value.find(s => 
+                  s.id === profileInterface.primarySubnetId ||
+                  String(s.id) === String(profileInterface.primarySubnetId) ||
+                  Number(s.id) === Number(profileInterface.primarySubnetId)
+                )
+                
+                if (subnet) {
+                  console.log(`[Apply Profile] Linking subnet ${profileInterface.primarySubnetId} (${subnet.cidr}) in automatic mode for interface ${interfaceName}`)
+                  
+                  try {
+                    const linkResponse = await axios.post(
+                      `http://localhost:8081/api/machines/${machine.id}/interfaces/${interfaceIdStr}/link-subnet`,
+                      null,
+                      {
+                        params: {
+                          maasUrl: apiParams.maasUrl,
+                          apiKey: apiParams.apiKey,
+                          subnetId: profileInterface.primarySubnetId,
+                          ipAddress: null // Automatic 모드
+                        }
+                      }
+                    )
+                    
+                    if (!linkResponse.data || !linkResponse.data.success) {
+                      console.warn(`[Apply Profile] Failed to link subnet:`, linkResponse.data?.error)
+                    } else {
+                      console.log(`[Apply Profile] Subnet linked successfully for interface ${interfaceName}`)
+                    }
+                  } catch (err) {
+                    console.warn(`[Apply Profile] Error linking subnet:`, err)
+                  }
+                } else {
+                  console.warn(`[Apply Profile] Subnet ID ${profileInterface.primarySubnetId} not found for interface ${interfaceName}`)
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Error applying profile to machine ${machine.id}:`, err)
+            throw err
+          }
+        }
+        
+        // 성공 시 머신 목록 새로고침
+        await loadMachines()
+        alert(`네트워크 프로파일 "${profile.name}"이(가) ${machines.length}개 머신에 적용되었습니다.`)
+        
+      } catch (err) {
+        console.error('Error applying network profile:', err)
+        alert(`프로파일 적용 중 오류가 발생했습니다: ${err.message}`)
+      } finally {
+        applyingProfile.value = false
+        showApplyProfileModal.value = false
+        selectedProfileForApply.value = null
+      }
+    }
+    
+    // Show apply profile modal for selected machines
+    const showApplyProfileModalDialog = (machines) => {
+      if (!machines || machines.length === 0) {
+        alert('프로파일을 적용할 머신을 선택해주세요.')
+        return
+      }
+      
+      loadNetworkProfiles()
+      if (networkProfiles.value.length === 0) {
+        alert('저장된 네트워크 프로파일이 없습니다. 먼저 프로파일을 생성해주세요.')
+        return
+      }
+      
+      // 프로파일 적용할 머신 목록 저장
+      machinesForProfileApply.value = machines
+      console.log(`[Apply Profile Modal] Machines to apply profile:`, machines.map(m => ({ id: m.id, hostname: m.hostname })))
+      
+      selectedProfileForApply.value = null
+      showApplyProfileModal.value = true
+    }
+    
+    // Apply profile from Management modal or Apply Profile modal
+    const applyProfileFromManagement = async (profile) => {
+      if (!profile) {
+        return
+      }
+      
+      // 네트워크 모달이 열려있으면 현재 선택된 머신에 적용
+      if (showNetworkModalState.value && selectedMachine.value) {
+        const confirmed = await customConfirm(
+          `프로파일 "${profile.name}"을(를) 머신 "${selectedMachine.value.hostname || selectedMachine.value.id}"에 적용하시겠습니까?`,
+          '프로파일 적용 확인'
+        )
+        
+        if (!confirmed) {
+          return
+        }
+        
+        // 모달 닫기
+        showNetworkProfileModal.value = false
+        showApplyProfileModal.value = false
+        
+        try {
+          await applyNetworkProfile(profile, [selectedMachine.value])
+          
+          // 프로파일 적용 후 네트워크 모달의 인터페이스 정보 새로고침
+          if (showNetworkModalState.value && selectedMachine.value) {
+            await showNetworkModal(selectedMachine.value)
+          }
+        } catch (err) {
+          console.error('Error applying profile from management:', err)
+        }
+      } else if (machinesForProfileApply.value && machinesForProfileApply.value.length > 0) {
+        // Apply Profile 모달에서 호출된 경우 (machinesForProfileApply 사용)
+        const confirmed = await customConfirm(
+          `프로파일 "${profile.name}"을(를) 선택된 ${machinesForProfileApply.value.length}개 머신에 적용하시겠습니까?`,
+          '프로파일 적용 확인'
+        )
+        
+        if (!confirmed) {
+          return
+        }
+        
+        // Apply Profile 모달 닫기
+        showApplyProfileModal.value = false
+        
+        try {
+          await applyNetworkProfile(profile, machinesForProfileApply.value)
+        } catch (err) {
+          console.error('Error applying profile:', err)
+        }
+      } else {
+        // 네트워크 모달이 닫혀있고 machinesForProfileApply도 없으면 선택된 머신들에 적용
+        const selected = getSelectedMachines()
+        
+        if (selected.length === 0) {
+          alert('프로파일을 적용할 머신을 선택해주세요.')
+          return
+        }
+        
+        const confirmed = await customConfirm(
+          `프로파일 "${profile.name}"을(를) 선택된 ${selected.length}개 머신에 적용하시겠습니까?`,
+          '프로파일 적용 확인'
+        )
+        
+        if (!confirmed) {
+          return
+        }
+        
+        // Manage Profiles 모달 닫기
+        showNetworkProfileModal.value = false
+        
+        try {
+          await applyNetworkProfile(profile, selected)
+        } catch (err) {
+          console.error('Error applying profile from management:', err)
+        }
+      }
+    }
+    
+    // Initialize: Load network profiles on component mount
+    loadNetworkProfiles()
+    
     // WebSocket 메시지 처리 (실시간 업데이트만)
     // ⚠️ 중요: 이 watch()는 useWebSocket()의 lastMessage를 감시함
     //           - useSettings() 등 다른 reactive 객체와 섞이지 않도록 주의
@@ -8641,6 +9426,26 @@ export default {
         getFilteredSubnetsForInterface,
         updateSecondaryIpPrefix,
         getDefaultIpExample,
+        // Network Profile
+        showNetworkProfileModal,
+        networkProfiles,
+        showSaveProfileModal,
+        newProfileName,
+        newProfileDescription,
+        savingProfile,
+        applyingProfile,
+        selectedProfileForApply,
+        showApplyProfileModal,
+        canSaveProfile,
+        canManageProfiles,
+        canApplyProfile,
+        showSaveProfileModalDialog,
+        showNetworkProfileManagementModal,
+        createNetworkProfile,
+        deleteNetworkProfile,
+        applyNetworkProfile,
+        applyProfileFromManagement,
+        showApplyProfileModalDialog,
         // WebSocket
         connectionStatus,
         lastMessage
@@ -11226,6 +12031,128 @@ export default {
   .machines-table {
     min-width: 1200px;
   }
+}
+
+/* Network Profile Styles */
+.no-profiles {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+}
+
+.profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.profile-item {
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 1rem;
+  background-color: #ffffff;
+  transition: box-shadow 0.2s ease;
+}
+
+.profile-item:hover {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.profile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.profile-info {
+  flex: 1;
+}
+
+.profile-info h4 {
+  margin: 0 0 0.5rem 0;
+  color: #212529;
+  font-size: 1.1rem;
+}
+
+.profile-description {
+  margin: 0.25rem 0;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.profile-meta {
+  margin: 0.5rem 0 0 0;
+  color: #868e96;
+  font-size: 0.85rem;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.btn-danger {
+  background-color: #dc3545;
+  color: #ffffff;
+  border: 1px solid #dc3545;
+}
+
+.btn-danger:hover {
+  background-color: #c82333;
+  border-color: #bd2130;
+}
+
+.profile-interfaces {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e9ecef;
+}
+
+.profile-interface-item {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.profile-interface-item strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #495057;
+}
+
+.interface-details {
+  font-size: 0.85rem;
+  color: #6c757d;
+}
+
+.profile-preview {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #007bff;
+}
+
+.profile-preview h4 {
+  margin: 0 0 0.75rem 0;
+  color: #212529;
+  font-size: 1rem;
+}
+
+.preview-content {
+  font-size: 0.9rem;
+  color: #495057;
+}
+
+.preview-content p {
+  margin: 0.5rem 0;
 }
 
 @media (max-width: 768px) {
