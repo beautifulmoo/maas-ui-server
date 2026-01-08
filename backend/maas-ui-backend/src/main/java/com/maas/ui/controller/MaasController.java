@@ -4,6 +4,7 @@ import com.maas.ui.service.MaasApiService;
 import com.maas.ui.service.MaasAuthService;
 import com.maas.ui.service.SettingsService;
 import com.maas.ui.service.CloudConfigTemplateService;
+import com.maas.ui.service.NetworkProfileService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +30,9 @@ public class MaasController {
     
     @Autowired
     private CloudConfigTemplateService cloudConfigTemplateService;
+    
+    @Autowired
+    private NetworkProfileService networkProfileService;
     
     /**
      * 설정을 가져옵니다.
@@ -767,6 +771,42 @@ public class MaasController {
         } catch (Exception e) {
             return ResponseEntity.status(500)
                     .body(Map.of("success", false, "error", "Failed to save cloud-config templates: " + e.getMessage()));
+        }
+    }
+    
+    /**
+     * 네트워크 프로파일 목록을 조회합니다.
+     */
+    @GetMapping("/network-profiles")
+    public ResponseEntity<Map<String, Object>> getNetworkProfiles() {
+        try {
+            List<Map<String, Object>> profiles = networkProfileService.loadProfiles();
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("profiles", profiles);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("success", false, "error", "Failed to load network profiles: " + e.getMessage()));
+        }
+    }
+    
+    /**
+     * 네트워크 프로파일을 저장합니다 (생성 또는 수정).
+     */
+    @PostMapping("/network-profiles")
+    public ResponseEntity<Map<String, Object>> saveNetworkProfiles(@RequestBody List<Map<String, Object>> profiles) {
+        try {
+            boolean success = networkProfileService.saveProfiles(profiles);
+            if (success) {
+                return ResponseEntity.ok(Map.of("success", true, "message", "Network profiles saved successfully"));
+            } else {
+                return ResponseEntity.status(500)
+                        .body(Map.of("success", false, "error", "Failed to save network profiles"));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("success", false, "error", "Failed to save network profiles: " + e.getMessage()));
         }
     }
     

@@ -608,13 +608,13 @@ MachinesTab.vue (실시간 UI 업데이트)
      - CSV 파일 검증 (2단계):
        - **1단계: CSV 내부 검증**
          - 필수 필드 검증: hostname, architecture, mac_address, power_type
-         - power_type이 'ipmi'인 경우 추가 필수 필드: power_driver, power_boot_type, power_address, power_user, power_pass
-         - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
+       - power_type이 'ipmi'인 경우 추가 필수 필드: power_driver, power_boot_type, power_address, power_user, power_pass
+       - MAC 주소 형식 검증 (12자리 16진수, ':' 구분자 선택적)
          - power_mac_address 형식 검증 (빈 값이 아닌 경우 MAC 주소 형식 필수)
          - IP 주소 형식 검증 (power_address, leading zeros 방지, 예: xx.xx.xx.03 -> xx.xx.xx.3)
-         - CSV 내 hostname 중복 검사
-         - CSV 내 mac_address 중복 검사
-         - 최소 필수 컬럼 수 검증 (컬럼이 부족하면 오류, 많으면 허용)
+       - CSV 내 hostname 중복 검사
+       - CSV 내 mac_address 중복 검사
+       - 최소 필수 컬럼 수 검증 (컬럼이 부족하면 오류, 많으면 허용)
        - **2단계: 기존 머신 정보와 비교 검증**
          - hostname 중복 검사 (기존 머신의 hostname과 비교)
          - mac_address 중복 검사 (기존 머신의 mac_addresses, power_parameters_mac_address와 비교)
@@ -823,17 +823,21 @@ MachinesTab.vue (실시간 UI 업데이트)
 - **출력**: 저장된 프로파일 목록 및 적용 결과
 - **주요 코드 파일**:
   - `MachinesTab.vue`: 네트워크 프로파일 관리 UI 및 로직
-  - localStorage: 프로파일 데이터 저장소 (`maas_network_profiles` 키)
+  - `NetworkProfileService.java`: 프로파일 파일 저장/로드 서비스
+  - `MaasController.getNetworkProfiles()` / `saveNetworkProfiles()`: API 엔드포인트
+  - `maas-network-profiles.json`: 프로파일 데이터 저장소 (프로젝트 루트 디렉토리)
 - **내부 로직 흐름**:
   1. **프로파일 저장**:
      - 네트워크 모달에서 "Save as Profile" 버튼 클릭
      - 프로파일 이름 및 설명 입력
      - 현재 네트워크 인터페이스 설정을 프로파일 형식으로 변환
-     - localStorage에 저장
+     - 백엔드 API (`POST /api/network-profiles`)를 통해 JSON 파일에 저장
+     - 파일 위치: `backend/maas-ui-backend/maas-network-profiles.json`
   2. **프로파일 관리**:
      - 네트워크 모달에서 "Manage Profiles" 버튼 클릭
+     - 백엔드 API (`GET /api/network-profiles`)를 통해 저장된 프로파일 목록 로드
      - 저장된 프로파일 목록 표시
-     - 프로파일 삭제 기능
+     - 프로파일 삭제 기능 (삭제 후 백엔드 API를 통해 파일 업데이트)
   3. **프로파일 적용**:
      - **방법 1**: 네트워크 모달에서 "Apply Profile" 버튼 클릭 → 프로파일 선택 → 적용
      - **방법 2**: "Manage Profiles" 모달에서 프로파일의 "Apply" 버튼 클릭
@@ -865,7 +869,9 @@ MachinesTab.vue (실시간 UI 업데이트)
   ```
 - **프로파일 적용 규칙**:
   - 프로파일의 인터페이스 이름과 머신의 인터페이스 이름이 일치하는 경우에만 적용
-  - Fabric은 프로파일에 지정된 값으로 설정
+  - **Fabric 동일 여부 확인**: 현재 머신의 Fabric과 프로파일의 Fabric이 동일한 경우 Fabric 업데이트를 건너뛰어 불필요한 작업 방지
+  - **Fabric 변경 시**: 기존 IP 링크 제거 후 새로운 Fabric으로 VLAN 업데이트
+  - **Fabric 동일 시**: 기존 링크 상태를 확인하여 이미 해당 Subnet에 연결되어 있으면 Subnet 링크를 건너뛰어 Secondary IP 생성 방지
   - Subnet은 Automatic 모드로 링크 (IP 주소는 null로 설정하여 자동 할당)
   - IP 주소는 프로파일 적용 시 설정하지 않으며, 사용자가 네트워크 모달에서 나중에 입력 가능
   - Secondary IP는 프로파일 적용 시 설정하지 않음 (필요시 사용자가 나중에 추가)
@@ -882,6 +888,8 @@ MachinesTab.vue (실시간 UI 업데이트)
   - **Fabric 설정 재사용**: `saveNetworkChanges` 함수의 검증된 로직을 재사용하여 안정적인 Fabric 설정
   - **자동 할당 모드**: 프로파일 적용 시 IP는 자동 할당 모드로 설정하여 사용자가 나중에 입력할 수 있도록 함
   - **프로파일 적용 후 네트워크 모달 새로고침**: 프로파일 적용 후 네트워크 모달이 열려있으면 인터페이스 정보 자동 새로고침
+  - **Fabric 동일 시 최적화**: 현재 Fabric과 프로파일 Fabric이 동일한 경우 불필요한 Fabric 업데이트를 건너뛰고, 기존 Subnet 링크를 확인하여 중복 링크로 인한 Secondary IP 생성을 방지
+  - **영구 저장**: 프로파일은 JSON 파일로 저장되어 브라우저를 닫아도 유지되며, 다른 브라우저나 세션에서도 동일한 프로파일 사용 가능
 
 #### 기능명: 머신 배포 (Deploy)
 - **설명**: 커미셔닝된 머신에 OS를 배포하며, Cloud-Config 템플릿을 선택하여 userdata를 설정할 수 있습니다
@@ -1400,10 +1408,15 @@ MachinesTab.vue (실시간 UI 업데이트)
 
 **네트워크 모달 버튼**:
 - **Cancel**: 모달 닫기
+- **X 버튼 (오른쪽 상단)**: 모달 닫기 (드래그 이벤트와 분리되어 이동 없이 즉시 닫힘)
 - **Manage Profiles**: 저장된 프로파일이 있을 때 활성화 (파란색), 프로파일 목록 관리 모달 표시
 - **Save as Profile**: 네트워크 인터페이스가 있고 저장 중이 아닐 때 활성화 (파란색), 현재 설정을 프로파일로 저장
 - **Apply Profile**: 프로파일이 있고 머신이 선택되어 있을 때 활성화 (파란색), 프로파일 선택 모달 표시
 - **Save Changes**: Ready, Allocated 상태에서만 활성화, 네트워크 변경사항 저장
+
+**네트워크 모달 닫기 동작**:
+- X 버튼 클릭 시 드래그 이벤트와 분리되어 모달이 이동하지 않고 즉시 닫힘 (`@mousedown.stop` 사용)
+- 모달 위치는 닫기 전에 리셋되어 다음 열 때 중앙에 표시됨
 
 #### Deploy 버튼 동작
 
@@ -2081,9 +2094,79 @@ public class MaasController {
 - **자동 처리**:
   - `cloudConfigBase64` 필드가 없으면 `cloudConfig`를 base64 인코딩하여 자동 추가
   - 서버 재시작 후에도 데이터 유지
+
+##### GET /api/network-profiles
+- **설명**: 네트워크 프로파일 목록 조회
+- **요청**: 없음
+- **응답**:
+```json
+{
+  "success": true,
+  "profiles": [
+    {
+      "id": "1704614400000",
+      "name": "Production Network",
+      "description": "Production environment network configuration",
+      "interfaces": [
+        {
+          "name": "enp0s3",
+          "fabricId": 1,
+          "ipAssignment": "automatic",
+          "primarySubnetId": 1,
+          "primarySubnetCidr": "192.168.1.0/24",
+          "secondaryIpAddresses": []
+        }
+      ],
+      "createdAt": "2026-01-08T00:00:00.000Z",
+      "updatedAt": "2026-01-08T00:00:00.000Z"
+    }
+  ]
+}
+```
 - **주요 코드 파일**:
-  - `MaasController.deleteTag()`: API 엔드포인트
-  - `MaasApiService.deleteTag()`: MAAS API 호출
+  - `MaasController.getNetworkProfiles()`: API 엔드포인트
+  - `NetworkProfileService.loadProfiles()`: 파일 로드
+- **파일 위치**: 프로젝트 루트 디렉토리의 `maas-network-profiles.json`
+
+##### POST /api/network-profiles
+- **설명**: 네트워크 프로파일 저장 (생성 또는 수정)
+- **요청 본문**: 프로파일 배열
+```json
+[
+  {
+    "id": "1704614400000",
+    "name": "Production Network",
+    "description": "Production environment network configuration",
+    "interfaces": [
+      {
+        "name": "enp0s3",
+        "fabricId": 1,
+        "ipAssignment": "automatic",
+        "primarySubnetId": 1,
+        "primarySubnetCidr": "192.168.1.0/24",
+        "secondaryIpAddresses": []
+      }
+    ],
+    "createdAt": "2026-01-08T00:00:00.000Z",
+    "updatedAt": "2026-01-08T00:00:00.000Z"
+  }
+]
+```
+- **응답**:
+```json
+{
+  "success": true,
+  "message": "Network profiles saved successfully"
+}
+```
+- **주요 코드 파일**:
+  - `MaasController.saveNetworkProfiles()`: API 엔드포인트
+  - `NetworkProfileService.saveProfiles()`: 파일 저장
+- **파일 위치**: 프로젝트 루트 디렉토리의 `maas-network-profiles.json`
+- **특징**:
+  - 프로파일은 JSON 파일로 저장되어 브라우저를 닫아도 유지됨
+  - 서버 재시작 후에도 데이터 유지
+  - 다른 브라우저나 세션에서도 동일한 프로파일 사용 가능
 
 ##### DELETE /api/machines/{systemId}
 - **설명**: 머신 삭제
@@ -2759,12 +2842,12 @@ maas.default.api-key=consumer_key:token:token_secret
    - "Validate" 버튼 클릭하여 CSV 파일 검증:
      - **1단계: CSV 내부 검증**
        - 필수 필드 검증 (hostname, architecture, mac_address, power_type)
-       - power_type이 'ipmi'인 경우 추가 필수 필드 검증
-       - MAC 주소 형식 검증
+     - power_type이 'ipmi'인 경우 추가 필수 필드 검증
+     - MAC 주소 형식 검증
        - power_mac_address 형식 검증 (빈 값이 아닌 경우)
        - IP 주소 형식 검증 (power_address, leading zeros 방지)
-       - CSV 내 중복 값 검증 (hostname, mac_address)
-       - 컬럼 수 검증
+     - CSV 내 중복 값 검증 (hostname, mac_address)
+     - 컬럼 수 검증
      - **2단계: 기존 머신 정보와 비교 검증**
        - hostname 중복 검사 (기존 머신의 hostname과 비교)
        - mac_address 중복 검사 (기존 머신의 mac_addresses, power_parameters_mac_address와 비교)
@@ -3319,6 +3402,6 @@ Fabric (물리적 네트워크)
 ---
 
 ## 문서 버전 정보
-- **작성일**: 2026년 01월 07일
-- **버전**: 1.0.1
+- **작성일**: 2026년 01월 08일
+- **버전**: 1.0.2
 

@@ -711,7 +711,7 @@
           :style="isDraggingNetworkModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>Network Configuration - {{ selectedMachine?.hostname || selectedMachine?.id }}</h3>
-          <button class="close-btn" @click="closeNetworkModal">&times;</button>
+          <button class="close-btn" @click="closeNetworkModal" @mousedown.stop>&times;</button>
         </div>
         
         <div class="network-modal-body">
@@ -7229,6 +7229,9 @@ export default {
       fabricVlanMap.value = {}
       fabricVlanIdsMap.value = {}
       
+      // Load network profiles when opening the modal
+      await loadNetworkProfiles()
+      
       try {
         const apiParams = settingsStore.getApiParams.value
         
@@ -7765,6 +7768,9 @@ export default {
     }
     
     const closeNetworkModal = () => {
+      // Reset modal position first to prevent visual movement
+      networkModalPosition.value = { top: 0, left: 0 }
+      // Then close the modal
       showNetworkModalState.value = false
       selectedMachine.value = null
       networkInterfaces.value = []
@@ -7772,8 +7778,6 @@ export default {
       availableFabrics.value = []
       availableSubnets.value = []
       fabricVlanMap.value = {}
-      // Reset modal position when closing
-      networkModalPosition.value = { top: 0, left: 0 }
     }
     
     const saveNetworkChanges = async () => {
@@ -8373,14 +8377,13 @@ export default {
     }
     
     // Network Profile Functions
-    const NETWORK_PROFILES_STORAGE_KEY = 'maas_network_profiles'
     
-    // Load network profiles from localStorage
-    const loadNetworkProfiles = () => {
+    // Load network profiles from backend API
+    const loadNetworkProfiles = async () => {
       try {
-        const stored = localStorage.getItem(NETWORK_PROFILES_STORAGE_KEY)
-        if (stored) {
-          networkProfiles.value = JSON.parse(stored)
+        const response = await axios.get('http://localhost:8081/api/network-profiles')
+        if (response.data && response.data.success && response.data.profiles) {
+          networkProfiles.value = response.data.profiles
         } else {
           networkProfiles.value = []
         }
@@ -8390,10 +8393,13 @@ export default {
       }
     }
     
-    // Save network profiles to localStorage
-    const saveNetworkProfiles = () => {
+    // Save network profiles to backend API
+    const saveNetworkProfiles = async () => {
       try {
-        localStorage.setItem(NETWORK_PROFILES_STORAGE_KEY, JSON.stringify(networkProfiles.value))
+        const response = await axios.post('http://localhost:8081/api/network-profiles', networkProfiles.value)
+        if (!response.data || !response.data.success) {
+          throw new Error(response.data?.error || 'Failed to save network profiles')
+        }
       } catch (err) {
         console.error('Error saving network profiles:', err)
         throw err
@@ -8401,7 +8407,7 @@ export default {
     }
     
     // Create a network profile from current network configuration
-    const createNetworkProfile = () => {
+    const createNetworkProfile = async () => {
       if (!networkInterfaces.value || networkInterfaces.value.length === 0) {
         alert('저장할 네트워크 설정이 없습니다.')
         return
@@ -8440,7 +8446,7 @@ export default {
       }
       
       networkProfiles.value.push(newProfile)
-      saveNetworkProfiles()
+      await saveNetworkProfiles()
       
       // Reset form
       newProfileName.value = ''
@@ -8464,7 +8470,7 @@ export default {
     }
     
     // Delete network profile
-    const deleteNetworkProfile = (profileId) => {
+    const deleteNetworkProfile = async (profileId) => {
       if (!confirm('이 프로파일을 삭제하시겠습니까?')) {
         return
       }
@@ -8472,13 +8478,13 @@ export default {
       const index = networkProfiles.value.findIndex(p => p.id === profileId)
       if (index !== -1) {
         networkProfiles.value.splice(index, 1)
-        saveNetworkProfiles()
+        await saveNetworkProfiles()
       }
     }
     
     // Show network profile management modal
-    const showNetworkProfileManagementModal = () => {
-      loadNetworkProfiles()
+    const showNetworkProfileManagementModal = async () => {
+      await loadNetworkProfiles()
       showNetworkProfileModal.value = true
     }
     
@@ -8698,6 +8704,14 @@ export default {
                                        newFabricId !== -1 &&
                                        (Number(originalFabricId) !== Number(newFabricId))
               
+              // Fabric이 동일한 경우 확인
+              const fabricIsSame = originalFabricId !== null && 
+                                  newFabricId !== null && 
+                                  newFabricId !== undefined && 
+                                  newFabricId !== '' &&
+                                  newFabricId !== -1 &&
+                                  (Number(originalFabricId) === Number(newFabricId))
+              
               if (fabricChangedFlag || (originalFabricId === null && newFabricId !== null && newFabricId !== undefined && newFabricId !== '' && newFabricId !== -1)) {
                 console.log(`[Apply Profile] Fabric changed for interface ${interfaceName}: originalFabricId=${originalFabricId}, newFabricId=${newFabricId}`)
                 
@@ -8756,6 +8770,8 @@ export default {
                     console.warn(`[Apply Profile] Fabric ${newFabricId} not found or has no vlan_id`)
                   }
                 }
+              } else if (fabricIsSame) {
+                console.log(`[Apply Profile] Fabric is same for interface ${interfaceName}: fabricId=${originalFabricId}, skipping fabric update`)
               }
               
               // Subnet 설정 (IP는 자동 할당 모드)
@@ -8773,6 +8789,29 @@ export default {
                 )
                 
                 if (subnet) {
+                  // Fabric이 동일한 경우, 기존 링크가 이미 해당 Subnet에 연결되어 있는지 확인
+                  if (fabricIsSame && networkInterface.originalPrimaryLinkId) {
+                    // 최신 머신 정보를 다시 가져와서 현재 링크 상태 확인
+                    const latestMachineResponse = await axios.get(`http://localhost:8081/api/machines/${machine.id}`, {
+                      params: apiParams
+                    })
+                    const latestMachineData = latestMachineResponse.data
+                    const currentInterface = latestMachineData?.interface_set?.find(i => i.id === interfaceId)
+                    
+                    if (currentInterface && currentInterface.links && currentInterface.links.length > 0) {
+                      const existingLink = currentInterface.links.find(link => 
+                        link.subnet?.id === profileInterface.primarySubnetId ||
+                        String(link.subnet?.id) === String(profileInterface.primarySubnetId) ||
+                        Number(link.subnet?.id) === Number(profileInterface.primarySubnetId)
+                      )
+                      
+                      if (existingLink) {
+                        console.log(`[Apply Profile] Interface ${interfaceName} already has subnet ${profileInterface.primarySubnetId} linked, skipping to avoid secondary IP`)
+                        continue // 이미 링크되어 있으면 건너뛰기
+                      }
+                    }
+                  }
+                  
                   console.log(`[Apply Profile] Linking subnet ${profileInterface.primarySubnetId} (${subnet.cidr}) in automatic mode for interface ${interfaceName}`)
                   
                   try {
@@ -8823,13 +8862,13 @@ export default {
     }
     
     // Show apply profile modal for selected machines
-    const showApplyProfileModalDialog = (machines) => {
+    const showApplyProfileModalDialog = async (machines) => {
       if (!machines || machines.length === 0) {
         alert('프로파일을 적용할 머신을 선택해주세요.')
         return
       }
       
-      loadNetworkProfiles()
+      await loadNetworkProfiles()
       if (networkProfiles.value.length === 0) {
         alert('저장된 네트워크 프로파일이 없습니다. 먼저 프로파일을 생성해주세요.')
         return

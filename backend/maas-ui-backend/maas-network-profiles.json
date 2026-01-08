@@ -1,0 +1,40 @@
+[ {
+  "id" : "1767852590424",
+  "name" : "vm01",
+  "description" : "111",
+  "interfaces" : [ {
+    "name" : "enp0s3",
+    "fabricId" : 1,
+    "ipAssignment" : "static",
+    "primaryIpAddress" : "192.168.189.101",
+    "secondaryIpAddresses" : [ ],
+    "primarySubnetId" : 2,
+    "primarySubnetCidr" : "192.168.189.0/24"
+  }, {
+    "name" : "enp0s10",
+    "fabricId" : 0,
+    "ipAssignment" : "static",
+    "primaryIpAddress" : "172.29.244.101",
+    "secondaryIpAddresses" : [ ],
+    "primarySubnetId" : 1,
+    "primarySubnetCidr" : "172.29.244.0/24"
+  }, {
+    "name" : "enp0s8",
+    "fabricId" : 2,
+    "ipAssignment" : "static",
+    "primaryIpAddress" : "172.29.236.101",
+    "secondaryIpAddresses" : [ ],
+    "primarySubnetId" : 3,
+    "primarySubnetCidr" : "172.29.236.0/24"
+  }, {
+    "name" : "enp0s9",
+    "fabricId" : 1,
+    "ipAssignment" : "automatic",
+    "primaryIpAddress" : "",
+    "secondaryIpAddresses" : [ ],
+    "primarySubnetId" : 2,
+    "primarySubnetCidr" : "192.168.189.0/24"
+  } ],
+  "createdAt" : "2026-01-08T06:09:50.424Z",
+  "updatedAt" : "2026-01-08T06:09:50.424Z"
+} ]
