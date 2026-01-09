@@ -2994,6 +2994,23 @@ maas.default.api-key=consumer_key:token:token_secret
   - 직관적인 드래그 인터페이스
   - 각 모달은 독립적인 위치 상태 관리
   - 모달 바깥쪽 클릭으로 실수로 닫히는 것을 방지
+- **모달 닫기 동작**:
+  - **X 버튼 (오른쪽 상단)**: 모든 모달의 X 버튼은 드래그 이벤트와 분리되어 동작
+  - X 버튼 클릭 시 `@mousedown.stop` 이벤트 핸들러로 드래그 시작을 방지하여 모달이 이동하지 않고 즉시 닫힘
+  - 드래그 가능한 모달의 경우, 닫기 함수에서 모달 위치를 먼저 리셋하여 다음 열 때 중앙에 표시됨
+  - 적용 모달:
+    - Machine Details 모달
+    - Network 설정 모달
+    - Deploy 모달
+    - Add Machine 모달
+    - Bulk Add from CSV 모달
+    - Validation 모달
+    - Bulk Upload Progress 모달
+    - Save Network Profile 모달
+    - Network Profile Management 모달
+    - Apply Network Profile 모달
+    - Tag Information 모달 (Configuration Tab)
+    - Cloud-Config Template 모달 (Configuration Tab)
 - **주요 코드 파일**:
   - `MachinesTab.vue`:
     - `startDragModal()`, `onDragModal()`, `stopDragModal()`: Machine Details 모달 드래그
@@ -3403,5 +3420,5 @@ Fabric (물리적 네트워크)
 
 ## 문서 버전 정보
 - **작성일**: 2026년 01월 08일
-- **버전**: 1.0.2
+- **버전**: 1.0.3
 

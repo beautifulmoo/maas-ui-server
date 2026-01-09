@@ -585,7 +585,7 @@
           :style="isDraggingDeployModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>Deploy {{ isBulkDeploy ? 'Multiple Machines' : (selectedDeployMachine?.hostname || selectedDeployMachine?.id) }}</h3>
-          <button class="close-btn" @click="closeDeployModal">&times;</button>
+          <button class="close-btn" @click="closeDeployModal" @mousedown.stop>&times;</button>
         </div>
         
         <div class="deploy-modal-body">
@@ -934,7 +934,7 @@
       <div class="modal-content" @click.stop style="max-width: 500px;">
         <div class="modal-header">
           <h3>Save Network Profile</h3>
-          <button class="close-btn" @click="showSaveProfileModal = false">&times;</button>
+          <button class="close-btn" @click="showSaveProfileModal = false" @mousedown.stop>&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
@@ -978,7 +978,7 @@
       <div class="modal-content" @click.stop style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
         <div class="modal-header">
           <h3>Network Profile Management</h3>
-          <button class="close-btn" @click="showNetworkProfileModal = false">&times;</button>
+          <button class="close-btn" @click="showNetworkProfileModal = false" @mousedown.stop>&times;</button>
         </div>
         <div class="modal-body">
           <div v-if="networkProfiles.length === 0" class="no-profiles">
@@ -1053,7 +1053,7 @@
       <div class="modal-content" @click.stop style="max-width: 600px;">
         <div class="modal-header">
           <h3>Apply Network Profile</h3>
-          <button class="close-btn" @click="showApplyProfileModal = false">&times;</button>
+          <button class="close-btn" @click="showApplyProfileModal = false" @mousedown.stop>&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
@@ -1111,7 +1111,7 @@
           :style="isDraggingModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>Machine Details: {{ selectedMachineForDetails?.hostname || selectedMachineForDetails?.id }}</h3>
-          <button class="close-btn" @click="closeMachineDetailsModal">&times;</button>
+          <button class="close-btn" @click="closeMachineDetailsModal" @mousedown.stop>&times;</button>
         </div>
         
         <div class="machine-details-modal-body">
@@ -2070,7 +2070,7 @@
           :style="isDraggingAddModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>Add New Machine</h3>
-          <button class="close-btn" @click="closeAddMachineModal">&times;</button>
+          <button class="close-btn" @click="closeAddMachineModal" @mousedown.stop>&times;</button>
         </div>
         
         <form @submit.prevent="addMachine" class="add-machine-form">
@@ -2384,7 +2384,7 @@
           :style="isDraggingBulkAddModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>Bulk Add Machines from CSV</h3>
-          <button class="close-btn" @click="closeBulkAddModal">&times;</button>
+          <button class="close-btn" @click="closeBulkAddModal" @mousedown.stop>&times;</button>
         </div>
         
         <div class="bulk-add-content">
@@ -2546,7 +2546,7 @@
             :style="isDraggingValidationModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
           >
             <h3>CSV Validation Result</h3>
-            <button class="close-btn" @click="closeValidationModal">&times;</button>
+            <button class="close-btn" @click="closeValidationModal" @mousedown.stop>&times;</button>
           </div>
           
           <div class="modal-body" v-if="csvValidationResult">
@@ -2619,6 +2619,7 @@
               v-if="!bulkUploadInProgress" 
               class="close-btn" 
               @click="closeBulkUploadProgressModal"
+              @mousedown.stop
             >&times;</button>
           </div>
           
@@ -3445,6 +3446,9 @@ export default {
     }
     
     const closeMachineDetailsModal = async () => {
+      // Reset modal position before closing to prevent visual jump
+      modalPosition.value = { top: 0, left: 0 }
+      
       // Power Type이 변경되었으면 머신 목록 리로드
       if (powerTypeChanged.value) {
         console.log('[Machine Details] Power type was changed, reloading machines list')
@@ -3459,8 +3463,6 @@ export default {
       machineBlockDevices.value = []
       machineEvents.value = []
       activeDetailsTab.value = 'overview'
-      // Reset modal position when closing
-      modalPosition.value = { top: 0, left: 0 }
     }
     
     // Modal drag handlers
@@ -4601,10 +4603,10 @@ export default {
     }
     
     const closeAddMachineModal = () => {
+      // Reset modal position before closing to prevent visual jump
+      addModalPosition.value = { top: 0, left: 0 }
       showAddModal.value = false
       resetNewMachineForm()
-      // Reset modal position when closing
-      addModalPosition.value = { top: 0, left: 0 }
     }
     
     // Add Machine Modal drag handlers
@@ -4748,8 +4750,9 @@ export default {
     }
     
     const closeBulkAddModal = () => {
-      showBulkAddModalState.value = false
+      // Reset modal position before closing to prevent visual jump
       bulkAddModalPosition.value = { top: 0, left: 0 }
+      showBulkAddModalState.value = false
       clearSelectedFile()
       isDragOver.value = false
       bulkAddButtonText.value = 'Validate' // 모달 닫을 때 버튼 텍스트 초기화
@@ -4941,8 +4944,9 @@ export default {
     })
     
     const closeBulkUploadProgressModal = async () => {
-      showBulkUploadProgress.value = false
+      // Reset modal position before closing to prevent visual jump
       bulkUploadProgressPosition.value = { top: 0, left: 0 }
+      showBulkUploadProgress.value = false
       
       // Reload machines list if upload was completed
       if (!bulkUploadInProgress.value) {
@@ -5331,8 +5335,9 @@ export default {
     }
     
     const closeValidationModal = () => {
-      showValidationModal.value = false
+      // Reset modal position before closing to prevent visual jump
       validationModalPosition.value = { top: 0, left: 0 }
+      showValidationModal.value = false
       // 검증 성공 시 버튼 텍스트를 "Upload & Process"로 변경
       if (csvValidationResult.value && csvValidationResult.value.isValid) {
         bulkAddButtonText.value = 'Upload & Process'
@@ -6149,6 +6154,8 @@ export default {
     
     const closeDeployModal = () => {
       if (deployingMachine.value) return // 배포 중이면 닫기 방지
+      // Reset modal position before closing to prevent visual jump
+      deployModalPosition.value = { top: 0, left: 0 }
       showDeployModalState.value = false
       selectedDeployMachine.value = null
       selectedDeployMachines.value = []

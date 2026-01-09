@@ -141,7 +141,7 @@
           :style="isDraggingTemplateModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>{{ editingTemplate ? 'Template Information' : 'New Template' }}</h3>
-          <button class="close-btn" @click="closeTemplateModal">&times;</button>
+          <button class="close-btn" @click="closeTemplateModal" @mousedown.stop>&times;</button>
         </div>
         
         <div class="modal-body">
@@ -236,7 +236,7 @@
           :style="isDraggingTagModal ? { cursor: 'grabbing' } : { cursor: 'grab' }"
         >
           <h3>Tag Information</h3>
-          <button class="close-btn" @click="closeTagModal">&times;</button>
+          <button class="close-btn" @click="closeTagModal" @mousedown.stop>&times;</button>
         </div>
         
         <div class="modal-body">
@@ -777,6 +777,8 @@ export default {
     }
     
     const closeTagModal = () => {
+      // Reset modal position before closing to prevent visual jump
+      tagModalPosition.value = { top: 0, left: 0 }
       showTagModal.value = false
       editingTag.value = null
       tagForm.value = {
@@ -785,11 +787,11 @@ export default {
         kernelOpts: '',
         definition: ''
       }
-      // Reset modal position
-      tagModalPosition.value = { top: 0, left: 0 }
     }
     
     const closeTemplateModal = () => {
+      // Reset modal position before closing to prevent visual jump
+      templateModalPosition.value = { top: 0, left: 0 }
       showTemplateModal.value = false
       editingTemplate.value = null
       templateForm.value = {
@@ -798,8 +800,6 @@ export default {
         description: '',
         cloudConfig: ''
       }
-      // Reset modal position
-      templateModalPosition.value = { top: 0, left: 0 }
     }
     
     const isTagFormValid = computed(() => {
